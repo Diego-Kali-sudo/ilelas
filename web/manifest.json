@@ -1,11 +1,11 @@
 {
-    "name": "prima_prova",
-    "short_name": "prima_prova",
+    "name": "ILelas",
+    "short_name": "ILelas",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#12182C",
+    "theme_color": "#12182C",
+    "description": "L'app ufficiale del Lelas — maestro orologiaio @ Orologio 2.0 🗿",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
