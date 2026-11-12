@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'pages/aziende_page.dart';
 import 'pages/frasi_page.dart';
 import 'pages/gioco_page.dart';
 import 'pages/home_page.dart';
-import 'pages/orologio_page.dart';
 import 'pages/segreto_page.dart';
 import 'state/lelas_state.dart';
 
@@ -17,7 +17,7 @@ class ILelasApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFFD4AF37), // oro, come gli orologi di Orologio 2.0
+      seedColor: const Color(0xFFD4AF37), // oro, come il lucido del Lelas
       brightness: Brightness.dark,
     );
     return MaterialApp(
@@ -48,7 +48,7 @@ class _RootShellState extends State<RootShell> {
 
   final _pages = const [
     HomePage(),
-    OrologioPage(),
+    AziendePage(),
     FrasiPage(),
     GiocoPage(),
     SegretoPage(),
@@ -103,7 +103,7 @@ class _RootShellState extends State<RootShell> {
             onDestinationSelected: _onTap,
             destinations: const [
               NavigationDestination(icon: Icon(Icons.face), label: 'Il Lelas'),
-              NavigationDestination(icon: Icon(Icons.watch), label: 'Orologio 2.0'),
+              NavigationDestination(icon: Icon(Icons.business), label: 'Aziende'),
               NavigationDestination(icon: Icon(Icons.chat_bubble), label: 'Frasi'),
               NavigationDestination(icon: Icon(Icons.apps), label: 'Gioco'),
               NavigationDestination(icon: Icon(Icons.lock_outline), label: 'Segreti'),

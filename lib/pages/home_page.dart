@@ -98,7 +98,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           controller: controller,
           obscureText: false,
           decoration: const InputDecoration(
-            hintText: 'Scrivi qui… (indizio: guarda in alto a destra della Palestra di Lelas)',
+            hintText: 'Scrivi qui… (indizio: guarda tra le sue aziende a Firenze)',
           ),
         ),
         actions: [
@@ -110,13 +110,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             onPressed: () {
               final code = controller.text.trim().toLowerCase().replaceAll(' ', '');
               final state = LelasState.instance;
-              if (code == 'orologio2.0' || code == 'orologio20') {
+              if (code == 'montefalchi' || code == 'ceo' || code == 'firenze') {
                 state.setUnlockAll();
                 Navigator.pop(context);
                 ScaffoldMessenger.of(this.context).showSnackBar(
                   const SnackBar(
                     backgroundColor: Colors.amber,
-                    content: Text('🏆 Dipendente del Mese! Tutto sbloccato.'),
+                    content: Text('🏆 CEO dell\'Anno! Tutto sbloccato.'),
                   ),
                 );
               } else if (code == 'lelas') {
@@ -192,7 +192,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               ),
               const SizedBox(height: 4),
               Text(
-                'Maestro orologiaio @ Orologio 2.0',
+                'CEO · Montefalchi SRL, Giocolare Coop, Genga APS, La Scatola Galluzzo',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: scheme.primary,
                     ),

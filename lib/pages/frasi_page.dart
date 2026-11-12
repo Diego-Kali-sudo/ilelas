@@ -15,17 +15,17 @@ class FrasiPage extends StatefulWidget {
 class _FrasiPageState extends State<FrasiPage> {
   static const _frasi = [
     "«Non è calvo, è aerodinamico.»",
-    "«Ogni orologio ha un'anima. La mia l'ho trovata al lavoro.»",
+    "«Ogni azienda ha un'anima. La mia l'ho trovata a Firenze.»",
     "«Il lucido non si compra, si sente.»",
-    "«Orologio 2.0: prima l'orologio, poi il 2.0.»",
+    "«Prima il sogno, poi la SRL.»",
     "«Se il tempo vola, io ho la licenza di pilotaggio.»",
-    "«Un Lelas, mille orologi, zero capelli... zero pensieri.»",
+    "«Un Lelas, quattro aziende, zero capelli... zero pensieri.»",
     "«La cura del dettaglio inizia dalla testa.»",
   ];
 
   static const _fraseSegreta =
-      '«Il segreto? Tratta ogni cliente come un amico e ogni orologio '
-      'come se fosse il primo che hai sistemato.» — Lelas, veramente.';
+      '«Il segreto? Tratta ogni cliente come un amico e ogni azienda '
+      'come se fosse la prima che hai fondato.» — Lelas, veramente.';
 
   int _index = 0;
 

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../state/lelas_state.dart';
 
 /// Pagina segreta: elenco achievement + codice + reset.
-/// Easter egg: il codice è "orologio2.0" (modalità Dipendente del Mese)
+/// Easter egg: il codice è "montefalchi" (modalità CEO dell'Anno)
 /// oppure "lelas" (Lelas Mode: pioggia di emoji).
 class SegretoPage extends StatelessWidget {
   const SegretoPage({super.key});
@@ -12,12 +12,12 @@ class SegretoPage extends StatelessWidget {
     final code = raw.trim().toLowerCase().replaceAll(' ', '');
     final state = LelasState.instance;
     final messenger = ScaffoldMessenger.of(context);
-    if (code == 'orologio2.0' || code == 'orologio20') {
+    if (code == 'montefalchi' || code == 'ceo' || code == 'firenze') {
       state.setUnlockAll();
       messenger.showSnackBar(
         const SnackBar(
           backgroundColor: Colors.amber,
-          content: Text('🏆 Dipendente del Mese! Tema dorato sbloccato.'),
+          content: Text('🏆 CEO dell\'Anno! Tema dorato sbloccato.'),
         ),
       );
     } else if (code == 'lelas') {
@@ -30,7 +30,7 @@ class SegretoPage extends StatelessWidget {
       );
     } else if (code.isNotEmpty) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('❌ Codice errato. Indizi: la pagina Orologio e la Home.')),
+        const SnackBar(content: Text('❌ Codice errato. Indizi: le sue aziende a Firenze e la Home.')),
       );
     }
   }
@@ -97,7 +97,7 @@ class SegretoPage extends StatelessWidget {
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
                   labelText: 'Codice segreto',
-                  hintText: 'Psst… due codici esistono. Uno riguarda il lavoro.',
+                  hintText: 'Psst… due codici esistono. Uno riguarda le sue aziende.',
                 ),
                 onSubmitted: (value) => _checkCode(context, value),
               ),

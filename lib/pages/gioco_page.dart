@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../state/lelas_state.dart';
@@ -15,10 +17,10 @@ class GiocoPage extends StatefulWidget {
   State<GiocoPage> createState() => _GiocoPageState();
 }
 
-class _GiocoPageState extends State<GiocoPage> {
+class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
   static const int _n = 8;
 
-  // Palette "Orologio 2.0": calda, oro e bronzo.
+  // Palette "CEO": calda, oro e bronzo.
   static const _palette = <Color>[
     Color(0xFFD4AF37), // oro
     Color(0xFFE67E22), // arancio
@@ -51,20 +53,51 @@ class _GiocoPageState extends State<GiocoPage> {
   int _best = 0;
   int _comboStreak = 0;
   int? _selected; // pezzo selezionato (tap)
-  List<(int, int)> _ghost = const []; // anteprima posizionamento
+  // Ghost isolato dal resto dell'UI: si aggiorna senza ricostruire tutto.
+  final ValueNotifier<List<(int, int)>> _ghostNotifier =
+      ValueNotifier(const []);
   bool _gameOver = false;
-  final GlobalKey _gridKey = GlobalKey();
 
-  /// Converte la posizione globale del drag in coordinate locali della griglia.
-  Offset _dragToLocal(DragTargetDetails<int> details) {
-    final box = _gridKey.currentContext?.findRenderObject() as RenderBox?;
-    return box?.globalToLocal(details.offset) ?? details.offset;
-  }
+  // ── Animazione distruzione blocchi ──
+  late final AnimationController _clearController;
+  bool _isClearing = false;
+  List<(int, int)> _clearingCells = const [];
+  int _pendingGain = 0;
+  int _pendingLines = 0;
+  List<_Particle> _particles = const [];
 
   @override
   void initState() {
     super.initState();
+    _clearController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _clearController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) _commitClear();
+    });
     _restart();
+  }
+
+  @override
+  void dispose() {
+    _clearController.dispose();
+    super.dispose();
+  }
+  final GlobalKey _gridKey = GlobalKey();
+
+  RenderBox? _gridBox;
+
+  /// Converte la posizione globale del drag in coordinate locali della griglia.
+  Offset _dragToLocal(DragTargetDetails<int> details) {
+    _gridBox ??= _gridKey.currentContext?.findRenderObject() as RenderBox?;
+    if (_gridBox == null || !_gridBox!.hasSize) {
+      _gridBox = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+    }
+    if (_gridBox == null) return details.offset;
+    final local = _gridBox!.globalToLocal(details.offset);
+    // Compensa il bordo (2px) del container della griglia.
+    return local - const Offset(2, 2);
   }
 
   void _restart() {
@@ -74,8 +107,11 @@ class _GiocoPageState extends State<GiocoPage> {
       _score = 0;
       _comboStreak = 0;
       _selected = null;
-      _ghost = const [];
+      _ghostNotifier.value = const [];
       _gameOver = false;
+      _isClearing = false;
+      _clearingCells = const [];
+      _particles = const [];
       _refillTray();
     });
   }
@@ -123,6 +159,7 @@ class _GiocoPageState extends State<GiocoPage> {
   }
 
   void _placePiece(int trayIndex, int r0, int c0) {
+    if (_isClearing) return;
     final piece = _tray[trayIndex];
     if (piece == null || !_canPlace(piece.cells, r0, c0)) return;
 
@@ -137,37 +174,98 @@ class _GiocoPageState extends State<GiocoPage> {
     }
     _tray[trayIndex] = null;
 
-    // Righe e colonne piene → esplodono.
+    // Righe e colonne piene → esplodono (ma NON le svuoto subito: animazione prima).
     final fullRows = [
       for (var r = 0; r < _n; r++)
         if (_grid[r].every((cell) => cell != null)) r,
     ];
     final fullCols = [
+      // ignore: curly_braces_in_flow_control_structures
       for (var c = 0; c < _n; c++)
         if ([for (var r = 0; r < _n; r++) _grid[r][c]].every((cell) => cell != null)) c,
     ];
+    final lines = fullRows.length + fullCols.length;
+
+    final clearing = <(int, int)>[];
     for (final r in fullRows) {
-      _grid[r] = List.filled(_n, null);
+      for (var c = 0; c < _n; c++) {
+        clearing.add((r, c));
+      }
     }
     for (final c in fullCols) {
       for (var r = 0; r < _n; r++) {
-        _grid[r][c] = null;
+        if (!clearing.contains((r, c))) clearing.add((r, c));
       }
     }
 
-    final lines = fullRows.length + fullCols.length;
-    // Bonus combo: più linee consecutive senza sbagliare, più punti.
     _comboStreak = lines == 0 ? 0 : _comboStreak + lines;
-    var gained = placedCells * 3 + lines * 10 * (lines == 0 ? 0 : lines) + _comboStreak * 2;
-    if (lines >= 2) gained += 20 * lines; // bonus combinazione
+    final gained = placedCells * 3 +
+        lines * 10 * (lines == 0 ? 0 : lines) +
+        _comboStreak * 2 +
+        (lines >= 2 ? 20 * lines : 0);
+
+    // Nessuna linea: aggiornamento immediato.
+    if (clearing.isEmpty) {
+      setState(() {
+        _score += gained;
+        if (_score > _best) _best = _score;
+        _selected = null;
+        _ghostNotifier.value = const [];
+        if (_tray.every((p) => p == null)) _refillTray();
+      });
+      if (_score >= 100) _unlockAchievement('maestro_dei_blocchi');
+      if (_isGameOver()) {
+        setState(() => _gameOver = true);
+        _showGameOver();
+      }
+      return;
+    }
+
+    // Animazione di distruzione.
+    final rng = Random();
+    final particles = <_Particle>[];
+    for (final (r, c) in clearing) {
+      final color = _grid[r][c] ?? const Color(0xFFD4AF37);
+      for (var i = 0; i < 2; i++) {
+        particles.add(_Particle(
+          r: r,
+          c: c,
+          angle: rng.nextDouble() * 2 * pi,
+          color: color,
+          emoji: rng.nextBool() ? '✨' : '💥',
+        ));
+      }
+    }
 
     setState(() {
+      _isClearing = true;
+      _clearingCells = clearing;
+      _pendingGain = gained;
+      _pendingLines = lines;
+      _selected = null;
+      _ghostNotifier.value = const [];
+      _particles = particles;
+    });
+    _clearController.forward(from: 0);
+  }
+
+  void _commitClear() {
+    for (final (r, c) in _clearingCells) {
+      _grid[r][c] = null;
+    }
+    final lines = _pendingLines;
+    final gained = _pendingGain;
+    setState(() {
+      _isClearing = false;
+      _clearingCells = const [];
+      _particles = const [];
       _score += gained;
       if (_score > _best) _best = _score;
-      _selected = null;
-      _ghost = const [];
       if (_tray.every((p) => p == null)) _refillTray();
     });
+
+    if (_score >= 100) _unlockAchievement('maestro_dei_blocchi');
+    if (lines >= 3) _unlockAchievement('griglia_devastata');
 
     if (lines > 0) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -180,10 +278,6 @@ class _GiocoPageState extends State<GiocoPage> {
         SnackBar(content: Text(msg), duration: const Duration(milliseconds: 900)),
       );
     }
-
-    // Achievement del gioco.
-    if (_score >= 100) _unlockAchievement('maestro_dei_blocchi');
-    if (lines >= 3) _unlockAchievement('griglia_devastata');
 
     if (_isGameOver()) {
       setState(() => _gameOver = true);
@@ -254,13 +348,20 @@ class _GiocoPageState extends State<GiocoPage> {
     return (bestR, bestC!);
   }
 
-  List<(int, int)> _ghostFor(_Piece piece, Offset local, double cell) {
-    final bp = _bestPlacement(piece, local, cell);
-    if (bp == null) return const [];
-    final (r0, c0) = bp;
+  /// Anteprima veloce durante il drag: calcolo O(1) basato sulla cella sotto il dito.
+  List<(int, int)> _ghostForFast(_Piece piece, Offset local, double cell) {
+    final cols = piece.cells[0].length;
+    final rows = piece.cells.length;
+    var c0 = (local.dx / cell).floor() - (cols ~/ 2);
+    var r0 = (local.dy / cell).floor() - (rows ~/ 2);
+    if (c0 < 0) c0 = 0;
+    if (r0 < 0) r0 = 0;
+    if (c0 > _n - cols) c0 = _n - cols;
+    if (r0 > _n - rows) r0 = _n - rows;
+    if (!_canPlace(piece.cells, r0, c0)) return const [];
     final out = <(int, int)>[];
-    for (var r = 0; r < piece.cells.length; r++) {
-      for (var c = 0; c < piece.cells[r].length; c++) {
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
         if (piece.cells[r][c] == 1) out.add((r0 + r, c0 + c));
       }
     }
@@ -291,7 +392,7 @@ class _GiocoPageState extends State<GiocoPage> {
               const Positioned.fill(
                 child: IgnorePointer(
                   child: Opacity(
-                    opacity: 0.22,
+                    opacity: 0.30,
                     child: Image(
                       image: AssetImage(LelasAvatar.assetPath),
                       fit: BoxFit.cover,
@@ -332,14 +433,17 @@ class _GiocoPageState extends State<GiocoPage> {
                           ),
                         ),
                         // ── Griglia di gioco (target dei drag) ──
-                        Padding(
-                          padding: const EdgeInsets.all(10),
+                        Stack(
+                          children: [
+                            RepaintBoundary(
+                              child: Padding(
+                                padding: const EdgeInsets.all(10),
                           child: DragTarget<int>(
                             builder: (context, candidate, rejected) {
                             return Container(
                               key: _gridKey,
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.35),
+                                color: Colors.black.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
                                   color: const Color(0xFFD4AF37),
@@ -347,7 +451,9 @@ class _GiocoPageState extends State<GiocoPage> {
                                 ),
                               ),
                               padding: EdgeInsets.zero,
-                              child: Column(
+                              child: ValueListenableBuilder<List<(int, int)>>(
+                                valueListenable: _ghostNotifier,
+                                builder: (context, ghost, _) => Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   for (var r = 0; r < _n; r++)
@@ -360,29 +466,67 @@ class _GiocoPageState extends State<GiocoPage> {
                                     ),
                                 ],
                               ),
-                            );
+                            ),
+                          );
                           },
                           onMove: (details) {
                             if (_selected == null) return;
                             final piece = _tray[_selected!];
                             if (piece == null) return;
-                            final ghost = _ghostFor(piece, _dragToLocal(details), cell);
-                            if (_ghost != ghost) {
-                              setState(() => _ghost = ghost);
-                            }
+                            final ghost = _ghostForFast(piece, _dragToLocal(details), cell);
+                            if (ghost.toString() == _ghostNotifier.value.toString()) return;
+                            _ghostNotifier.value = ghost;
                           },
-                          onWillAcceptWithDetails: (details) => _selected != null,
+                          onWillAcceptWithDetails: (details) => !_isClearing && _selected != null,
                           onAcceptWithDetails: (details) {
                             final piece = _tray[_selected!];
                             if (piece == null) return;
-                            final ghost = _ghostFor(piece, _dragToLocal(details), cell);
-                            if (ghost.isNotEmpty) {
-                              _placePiece(_selected!, ghost.first.$1, ghost.first.$2);
+                            final bp = _bestPlacement(piece, _dragToLocal(details), cell);
+                            if (bp != null) {
+                              _placePiece(_selected!, bp.$1, bp.$2);
                             }
                           },
                         ),
                       ),
-                        const SizedBox(height: 4),
+                      ),
+                      // ── Particelle di esplosione ──
+                      if (_isClearing)
+                        SizedBox(
+                          width: width,
+                          height: _n * cell + 20,
+                          child: AnimatedBuilder(
+                            animation: _clearController,
+                            builder: (context, _) => Stack(
+                              children: _particles.map((p) {
+                              final t = _clearController.value;
+                              final startX = p.c * cell + cell / 2 + 10;
+                              final startY = p.r * cell + cell / 2 + 10;
+                              final dx = cos(p.angle) * t * 40;
+                              final dy = sin(p.angle) * t * 40;
+                              return Positioned(
+                                left: startX + dx - 8,
+                                top: startY + dy - 8,
+                                child: Opacity(
+                                  opacity: (1 - t).clamp(0.0, 1.0),
+                                  child: Transform.scale(
+                                    scale: (1 + t * 0.6).clamp(0.0, 2.0),
+                                    child: Text(
+                                      p.emoji,
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: p.color,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                        )
+                    ],
+                  ),
+                  const SizedBox(height: 4),
                         Text(
                           'Tocca un pezzo e trascinalo sulla griglia (o selezionalo e tocca una cella)',
                           style: Theme.of(context).textTheme.bodySmall,
@@ -411,21 +555,41 @@ class _GiocoPageState extends State<GiocoPage> {
 
   Widget _cell(int r, int c, double size) {
     final color = _grid[r][c];
-    final isGhost = _ghost.any((g) => g.$1 == r && g.$2 == c);
+    final isGhost = _ghostNotifier.value.any((g) => g.$1 == r && g.$2 == c);
+    final isClearing = _clearingCells.contains((r, c));
     Widget inner;
-    if (color != null) {
+    if (isClearing) {
+      inner = TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.0, end: 1.0),
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+        builder: (context, t, _) {
+          final scale = (1.0 - t * 0.75).clamp(0.0, 1.0);
+          final opacity = (1.0 - t).clamp(0.0, 1.0);
+          return Opacity(
+            opacity: opacity,
+            child: Transform.scale(
+              scale: scale,
+              child: Transform.rotate(
+                angle: t * (pi / 4),
+                child: Container(
+                  margin: const EdgeInsets.all(1),
+                  decoration: BoxDecoration(
+                    color: color ?? const Color(0xFFD4AF37),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } else if (color != null) {
       inner = Container(
         margin: const EdgeInsets.all(1),
         decoration: BoxDecoration(
           color: color,
           borderRadius: BorderRadius.circular(4),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.5),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
         ),
       );
     } else if (isGhost) {
@@ -444,7 +608,7 @@ class _GiocoPageState extends State<GiocoPage> {
       inner = Container(
         margin: const EdgeInsets.all(1),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.06),
+          color: Colors.white.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(4),
         ),
       );
@@ -454,6 +618,7 @@ class _GiocoPageState extends State<GiocoPage> {
       height: size,
       child: GestureDetector(
         onTap: () {
+          if (_isClearing) return;
           if (_selected == null) return;
           final piece = _tray[_selected!];
           if (piece == null) return;
@@ -486,10 +651,13 @@ class _GiocoPageState extends State<GiocoPage> {
     final w = cols * mini + 4;
     final h = rows * mini + 4;
     return GestureDetector(
-      onTap: () => setState(() {
-        _selected = selected ? null : index;
-        _ghost = const [];
-      }),
+      onTap: () {
+        if (_isClearing) return;
+        setState(() {
+          _selected = selected ? null : index;
+          _ghostNotifier.value = const [];
+        });
+      },
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
@@ -509,7 +677,7 @@ class _GiocoPageState extends State<GiocoPage> {
             data: index,
             onDragStarted: () => setState(() {
               _selected = index;
-              _ghost = const [];
+              _ghostNotifier.value = const [];
             }),
             feedback: Transform.translate(
               offset: Offset(-w / 2, -h / 2),
@@ -552,13 +720,6 @@ class _GiocoPageState extends State<GiocoPage> {
                     decoration: BoxDecoration(
                       color: piece.color,
                       borderRadius: BorderRadius.circular(4),
-                      boxShadow: [
-                        BoxShadow(
-                          color: piece.color.withValues(alpha: 0.5),
-                          blurRadius: 3,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
                     ),
                   )
                 else
@@ -570,6 +731,20 @@ class _GiocoPageState extends State<GiocoPage> {
   }
 }
 
+class _Particle {
+  const _Particle({
+    required this.r,
+    required this.c,
+    required this.angle,
+    required this.color,
+    required this.emoji,
+  });
+  final int r;
+  final int c;
+  final double angle;
+  final Color color;
+  final String emoji;
+}
 class _Piece {
   const _Piece({required this.cells, required this.color});
   final List<List<int>> cells;
