@@ -42,7 +42,16 @@ jobs:
         run: flutter test || echo "::warning::Test falliti, la build continua"
 
       - name: Build APK release
-        run: flutter build apk --release
+        run: |
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee build_log.txt || {
+            echo "## ❌ Errore di build APK" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 120 build_log.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
 
       - name: Leggi la versione
         id: ver
