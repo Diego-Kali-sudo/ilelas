@@ -68,6 +68,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
   final GlobalKey _gridKey = GlobalKey();
   RenderBox? _gridBox;
 
+  final Random _rng = Random();
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +86,12 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     );
     _restart();
     _loadHighScore();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _isGameOver()) {
+        setState(() => _gameOver = true);
+        _showGameOver();
+      }
+    });
   }
 
   @override
@@ -158,22 +166,105 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     return true;
   }
 
-  final Random _rng = Random();
+  // ───────────────────────── RANDOMIZZAZIONE STILE BLOCK BLAST ─────────────────────────
 
-  void _refillTray() {
-    for (var i = 0; i < 3; i++) {
-      if (_tray[i] != null) continue;
-      // Pezzo casuale: evita di ripetere la stessa forma del vicino.
-      List<List<int>> shape;
-      do {
-        shape = _shapes[_rng.nextInt(_shapes.length)];
-      } while (i > 0 && _tray[i - 1] != null && _sameShape(shape, _tray[i - 1]!.cells));
-      _tray[i] = _Piece(
+  /// Celle ancora libere nella griglia (0..64).
+  int get _freeCells {
+    var free = 0;
+    for (final row in _grid) {
+      for (final cell in row) {
+        if (cell == null) free++;
+      }
+    }
+    return free;
+  }
+
+  /// Peso di un pezzo: i grandi sono più rari, e lo diventano ancora di più
+  /// man mano che la griglia si riempie.
+  int _weightFor(List<List<int>> shape, double freeRatio) {
+    final n = _cellCount(shape);
+    if (n <= 2) return 4;
+    if (n <= 4) return 3;
+    return freeRatio < 0.35 ? 1 : 2;
+  }
+
+  /// Estrae uno shape casuale con probabilità pesata, evitando i doppioni.
+  List<List<int>> _pickShape(List<List<List<int>>> avoid, double freeRatio) {
+    final pool = <List<List<int>>>[];
+    for (final s in _shapes) {
+      final w = _weightFor(s, freeRatio);
+      for (var k = 0; k < w; k++) {
+        pool.add(s);
+      }
+    }
+    for (var attempt = 0; attempt < 25; attempt++) {
+      final s = pool[_rng.nextInt(pool.length)];
+      if (avoid.any((a) => _sameShape(a, s))) continue;
+      return s;
+    }
+    return pool[_rng.nextInt(pool.length)];
+  }
+
+  /// Genera [count] pezzi nuovi, garantendo che almeno uno sia piazzabile
+  /// (anti soft-lock immediato).
+  List<_Piece> _generateBatch(int count) {
+    final freeRatio = _freeCells / (_n * _n);
+    final pieces = <_Piece>[];
+    for (var i = 0; i < count; i++) {
+      final shape = _pickShape(
+        [for (final p in pieces) p.cells],
+        freeRatio,
+      );
+      pieces.add(_Piece(
         cells: shape,
         color: _palette[_rng.nextInt(_palette.length)],
-      );
+      ));
+    }
+
+    // Nessuno dei nuovi pezzi entra? Rimpiazza il più grosso con uno
+    // che ci sta davvero.
+    if (!pieces.any(_anyPlacement)) {
+      final playable =
+          _shapes.where(_anyShapePlacement).toList(growable: false);
+      if (playable.isNotEmpty) {
+        var worst = 0;
+        for (var i = 1; i < pieces.length; i++) {
+          if (_cellCount(pieces[i].cells) > _cellCount(pieces[worst].cells)) {
+            worst = i;
+          }
+        }
+        pieces[worst] = _Piece(
+          cells: playable[_rng.nextInt(playable.length)],
+          color: _palette[_rng.nextInt(_palette.length)],
+        );
+      }
+    }
+    return pieces;
+  }
+
+  bool _anyShapePlacement(List<List<int>> cells) {
+    for (var r = 0; r <= _n - cells.length; r++) {
+      for (var c = 0; c <= _n - cells[0].length; c++) {
+        if (_canPlace(cells, r, c)) return true;
+      }
+    }
+    return false;
+  }
+
+  void _refillTray() {
+    final empty = <int>[
+      for (var i = 0; i < 3; i++)
+        if (_tray[i] == null) i,
+    ];
+    if (empty.isEmpty) return;
+    final batch = _generateBatch(empty.length);
+    for (var k = 0; k < empty.length; k++) {
+      _tray[empty[k]] = batch[k];
     }
   }
+
+  int _cellCount(List<List<int>> s) =>
+      s.fold(0, (sum, row) => sum + row.where((v) => v == 1).length);
 
   bool _sameShape(List<List<int>> a, List<List<int>> b) {
     if (a.length != b.length) return false;
@@ -185,6 +276,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     }
     return true;
   }
+
+  // ───────────────────────── PLACEMENT / CLEAR ─────────────────────────
 
   (int, int)? _bestPlacement(_Piece piece, Offset local, double cell) {
     final cols = piece.cells[0].length;
@@ -250,7 +343,9 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     ];
     final fullCols = [
       for (var c = 0; c < _n; c++)
-        if ([for (var r = 0; r < _n; r++) _grid[r][c]].every((cell) => cell != null)) c,
+        if ([for (var r = 0; r < _n; r++) _grid[r][c]]
+            .every((cell) => cell != null))
+          c,
     ];
     final lines = fullRows.length + fullCols.length;
 
@@ -345,7 +440,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
               : '⌚ Linea pulita dal Lelas! +$gained';
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), duration: const Duration(milliseconds: 900)),
+        SnackBar(
+            content: Text(msg), duration: const Duration(milliseconds: 900)),
       );
     }
 
@@ -474,8 +570,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                               ),
                               Text(
                                 'RECORD: $_best',
-                                style:
-                                    Theme.of(context).textTheme.titleMedium,
+                                style: Theme.of(context).textTheme.titleMedium,
                               ),
                             ],
                           ),
@@ -516,7 +611,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                             children: [
                                               for (var r = 0; r < _n; r++)
                                                 Row(
-                                                  mainAxisSize: MainAxisSize.min,
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
                                                   children: [
                                                     for (var c = 0; c < _n; c++)
                                                       _cell(r, c, cell),
@@ -552,9 +648,17 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                       var bp = _bestPlacement(
                                           piece, _dragToLocal(details), cell);
                                       if (bp == null) {
-                                        for (var r0 = 0; r0 <= _n - piece.cells.length; r0++) {
-                                          for (var c0 = 0; c0 <= _n - piece.cells[0].length; c0++) {
-                                            if (_canPlace(piece.cells, r0, c0)) {
+                                        for (var r0 = 0;
+                                            r0 <= _n - piece.cells.length;
+                                            r0++) {
+                                          for (var c0 = 0;
+                                              c0 <=
+                                                  _n -
+                                                      piece
+                                                          .cells[0].length;
+                                              c0++) {
+                                            if (_canPlace(
+                                                piece.cells, r0, c0)) {
                                               bp = (r0, c0);
                                               break;
                                             }
