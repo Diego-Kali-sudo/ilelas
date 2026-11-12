@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'pages/frasi_page.dart';
+import 'pages/gioco_page.dart';
 import 'pages/home_page.dart';
 import 'pages/orologio_page.dart';
 import 'pages/segreto_page.dart';
@@ -49,6 +50,7 @@ class _RootShellState extends State<RootShell> {
     HomePage(),
     OrologioPage(),
     FrasiPage(),
+    GiocoPage(),
     SegretoPage(),
   ];
 
@@ -103,6 +105,7 @@ class _RootShellState extends State<RootShell> {
               NavigationDestination(icon: Icon(Icons.face), label: 'Il Lelas'),
               NavigationDestination(icon: Icon(Icons.watch), label: 'Orologio 2.0'),
               NavigationDestination(icon: Icon(Icons.chat_bubble), label: 'Frasi'),
+              NavigationDestination(icon: Icon(Icons.apps), label: 'Gioco'),
               NavigationDestination(icon: Icon(Icons.lock_outline), label: 'Segreti'),
             ],
           ),

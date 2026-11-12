@@ -31,6 +31,8 @@ class LelasState extends ChangeNotifier {
     'frase_segreta': ('🤫 Frase Segreta', '7 frasi: hai sbloccato quella vera.'),
     'dipendente_del_mese': ('🏆 Dipendente del Mese', 'Codice segreto inserito!'),
     'lelas_mode': ('🗿 Lelas Mode', 'Pioggia di Lelas attivata.'),
+    'maestro_dei_blocchi': ('🧱 Maestro dei Blocchi', '100 punti nel Block Lelas!'),
+    'griglia_devastata': ('💥 Griglia Devastata', '3+ righe/colonne in una mossa!'),
   };
 
   /// Sblocca un achievement e ritorna true se è nuovo (per il popup).
