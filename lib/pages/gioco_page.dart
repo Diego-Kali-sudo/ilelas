@@ -229,17 +229,38 @@ class _GiocoPageState extends State<GiocoPage> {
     );
   }
 
-  /// Calcola la cella in alto a sinistra dove finirebbe il pezzo
-  /// trascinandolo sopra la griglia.
-  List<(int, int)> _ghostCells(_Piece piece, Offset local, double cell) {
+  /// Trova il piazzamento valido più vicino al punto di rilascio.
+  /// Rende l'aggancio alla griglia "magnetico" e tollerante.
+  (int, int)? _bestPlacement(_Piece piece, Offset local, double cell) {
     final cols = piece.cells[0].length;
     final rows = piece.cells.length;
-    final c0 = ((local.dx - cols * cell / 2) / cell).round();
-    final r0 = ((local.dy - rows * cell / 2) / cell).round();
-    if (!_canPlace(piece.cells, r0, c0)) return const [];
+    int? bestR, bestC;
+    var bestDist = double.infinity;
+    for (var r0 = 0; r0 <= _n - rows; r0++) {
+      for (var c0 = 0; c0 <= _n - cols; c0++) {
+        if (!_canPlace(piece.cells, r0, c0)) continue;
+        final cx = (c0 + cols / 2) * cell;
+        final cy = (r0 + rows / 2) * cell;
+        final d = (cx - local.dx) * (cx - local.dx) +
+            (cy - local.dy) * (cy - local.dy);
+        if (d < bestDist) {
+          bestDist = d;
+          bestR = r0;
+          bestC = c0;
+        }
+      }
+    }
+    if (bestR == null) return null;
+    return (bestR, bestC!);
+  }
+
+  List<(int, int)> _ghostFor(_Piece piece, Offset local, double cell) {
+    final bp = _bestPlacement(piece, local, cell);
+    if (bp == null) return const [];
+    final (r0, c0) = bp;
     final out = <(int, int)>[];
-    for (var r = 0; r < rows; r++) {
-      for (var c = 0; c < cols; c++) {
+    for (var r = 0; r < piece.cells.length; r++) {
+      for (var c = 0; c < piece.cells[r].length; c++) {
         if (piece.cells[r][c] == 1) out.add((r0 + r, c0 + c));
       }
     }
@@ -270,7 +291,7 @@ class _GiocoPageState extends State<GiocoPage> {
               const Positioned.fill(
                 child: IgnorePointer(
                   child: Opacity(
-                    opacity: 0.16,
+                    opacity: 0.22,
                     child: Image(
                       image: AssetImage(LelasAvatar.assetPath),
                       fit: BoxFit.cover,
@@ -311,20 +332,21 @@ class _GiocoPageState extends State<GiocoPage> {
                           ),
                         ),
                         // ── Griglia di gioco (target dei drag) ──
-                        DragTarget<int>(
-                          builder: (context, candidate, rejected) {
+                        Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: DragTarget<int>(
+                            builder: (context, candidate, rejected) {
                             return Container(
                               key: _gridKey,
-                              margin: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.45),
+                                color: Colors.black.withValues(alpha: 0.35),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
                                   color: const Color(0xFFD4AF37),
                                   width: 2,
                                 ),
                               ),
-                              padding: const EdgeInsets.all(6),
+                              padding: EdgeInsets.zero,
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -344,7 +366,7 @@ class _GiocoPageState extends State<GiocoPage> {
                             if (_selected == null) return;
                             final piece = _tray[_selected!];
                             if (piece == null) return;
-                            final ghost = _ghostCells(piece, _dragToLocal(details), cell);
+                            final ghost = _ghostFor(piece, _dragToLocal(details), cell);
                             if (_ghost != ghost) {
                               setState(() => _ghost = ghost);
                             }
@@ -353,15 +375,16 @@ class _GiocoPageState extends State<GiocoPage> {
                           onAcceptWithDetails: (details) {
                             final piece = _tray[_selected!];
                             if (piece == null) return;
-                            final ghost = _ghostCells(piece, _dragToLocal(details), cell);
+                            final ghost = _ghostFor(piece, _dragToLocal(details), cell);
                             if (ghost.isNotEmpty) {
                               _placePiece(_selected!, ghost.first.$1, ghost.first.$2);
                             }
                           },
                         ),
+                      ),
                         const SizedBox(height: 4),
                         Text(
-                          'Tocca un pezzo e trascinalo sulla griglia',
+                          'Tocca un pezzo e trascinalo sulla griglia (o selezionalo e tocca una cella)',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                         const SizedBox(height: 8),
@@ -429,7 +452,26 @@ class _GiocoPageState extends State<GiocoPage> {
     return SizedBox(
       width: size,
       height: size,
-      child: inner,
+      child: GestureDetector(
+        onTap: () {
+          if (_selected == null) return;
+          final piece = _tray[_selected!];
+          if (piece == null) return;
+          final bp = _bestPlacement(piece, Offset((c + 0.5) * size, (r + 0.5) * size), size);
+          if (bp != null) {
+            _placePiece(_selected!, bp.$1, bp.$2);
+          } else {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Nessuno spazio libero per questo pezzo.'),
+                duration: Duration(milliseconds: 700),
+              ),
+            );
+          }
+        },
+        child: inner,
+      ),
     );
   }
 
@@ -441,8 +483,8 @@ class _GiocoPageState extends State<GiocoPage> {
     }
     final cols = piece.cells[0].length;
     final rows = piece.cells.length;
-    final w = cols * mini;
-    final h = rows * mini;
+    final w = cols * mini + 4;
+    final h = rows * mini + 4;
     return GestureDetector(
       onTap: () => setState(() {
         _selected = selected ? null : index;
@@ -465,15 +507,28 @@ class _GiocoPageState extends State<GiocoPage> {
           height: h,
           child: Draggable<int>(
             data: index,
+            onDragStarted: () => setState(() {
+              _selected = index;
+              _ghost = const [];
+            }),
             feedback: Transform.translate(
               offset: Offset(-w / 2, -h / 2),
-              child: _pieceCells(piece, mini),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: _pieceCells(piece, mini),
+              ),
             ),
             childWhenDragging: Opacity(
               opacity: 0.3,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: _pieceCells(piece, mini),
+              ),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
               child: _pieceCells(piece, mini),
             ),
-            child: _pieceCells(piece, mini),
           ),
         ),
       ),
