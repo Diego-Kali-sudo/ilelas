@@ -45,13 +45,18 @@ jobs:
         run: |
           set -o pipefail
           flutter build apk --release 2>&1 | tee build_log.txt || {
-            echo "## ❌ Errore di build APK" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            tail -n 120 build_log.txt >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 150 build_log.txt > build_error.txt
             exit 1
           }
+
+      - name: Pubblica il log dell'errore nel repo
+        if: failure()
+        run: |
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git add build_error.txt
+          git commit -m "CI: log errore di build [skip ci]"
+          git push
 
       - name: Leggi la versione
         id: ver
