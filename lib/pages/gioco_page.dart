@@ -19,10 +19,6 @@ class GiocoPage extends StatefulWidget {
 class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
   static const int _n = 8;
 
-  /// Margine extra attorno alla griglia entro cui il drop viene accettato.
-  /// Aiuta su mobile, dove il dito è impreciso e il feedback è sollevato.
-  static const double _dropMargin = 40.0;
-
   static const _palette = <Color>[
     Color(0xFFD4AF37),
     Color(0xFFE67E22),
@@ -537,8 +533,16 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
       body: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth.clamp(0.0, 480.0);
-          final cell = ((width - 40 - 7 * 2) / _n).floorToDouble();
+
+          // La zona "grid + dropMargin" deve stare in `width`:
+          //   dropMargin = 0.8·cell per lato ⇒ serve (n + 1.6)·cell
+          // Più 16px di padding di sicurezza per non toccare i bordi.
+          final cell = ((width - 16) / (_n + 1.6)).floorToDouble();
           final mini = (cell * 0.55).floorToDouble();
+          final gridSize = _n * cell;
+          final dropMargin = cell * 0.8;
+          final outerSize = gridSize + 2 * dropMargin;
+
           return Stack(
             children: [
               const Positioned.fill(
@@ -558,6 +562,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                   child: SizedBox(
                     width: width,
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Padding(
                           padding: const EdgeInsets.symmetric(
@@ -582,7 +587,11 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                             ],
                           ),
                         ),
-                        // ── Griglia (CustomPaint) + DragTarget esteso ──
+
+                        // ── Area griglia: SizedBox "grande" (gridSize +
+                        //    2·dropMargin) così il DragTarget riceve i tocchi
+                        //    anche sotto la griglia. La griglia visiva è
+                        //    posizionata dentro, offsettata di dropMargin.
                         AnimatedBuilder(
                           animation: _shakeController,
                           builder: (context, _) {
@@ -593,32 +602,29 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                             return Transform.translate(
                               offset: Offset(shakeDx, 0),
                               child: RepaintBoundary(
-                                child: DragTarget<int>(
-                                  builder: (context, candidate, rejected) {
-                                    // Padding esterno: estende l'area
-                                    // droppabile di _dropMargin attorno alla
-                                    // griglia (fix mobile: il dito è impreciso
-                                    // e il feedback è sollevato).
-                                    return Container(
-                                      color: Colors.transparent,
-                                      padding:
-                                          const EdgeInsets.all(_dropMargin),
-                                      child: Container(
-                                        key: _gridKey,
-                                        decoration: BoxDecoration(
-                                          color: Colors.black
-                                              .withValues(alpha: 0.20),
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                          border: Border.all(
-                                            color: const Color(0xFFD4AF37),
-                                            width: 2,
+                                child: SizedBox(
+                                  width: outerSize,
+                                  height: outerSize,
+                                  child: Stack(
+                                    children: [
+                                      // Griglia visiva (con _gridKey qui)
+                                      Positioned(
+                                        left: dropMargin,
+                                        top: dropMargin,
+                                        width: gridSize,
+                                        height: gridSize,
+                                        child: Container(
+                                          key: _gridKey,
+                                          decoration: BoxDecoration(
+                                            color: Colors.black
+                                                .withValues(alpha: 0.20),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            border: Border.all(
+                                              color: const Color(0xFFD4AF37),
+                                              width: 2,
+                                            ),
                                           ),
-                                        ),
-                                        padding: EdgeInsets.zero,
-                                        child: SizedBox(
-                                          width: _n * cell,
-                                          height: _n * cell,
                                           child: CustomPaint(
                                             painter: _GridPainter(
                                               grid: _grid,
@@ -635,86 +641,168 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                           ),
                                         ),
                                       ),
-                                    );
-                                  },
-                                  onMove: (details) {
-                                    if (_isClearing) return;
-                                    if (_selected == null) return;
-                                    final piece = _tray[_selected!];
-                                    if (piece == null) return;
-                                    final base = _dragToLocal(details);
-                                    final adjusted = base -
-                                        Offset(0, _liftFor(piece, cell));
-                                    final ghost = _ghostForFast(
-                                        piece, adjusted, cell);
-                                    if (setEquals(
-                                        ghost, _ghostNotifier.value)) {
-                                      return;
-                                    }
-                                    _ghostNotifier.value = ghost;
-                                  },
-                                  onWillAcceptWithDetails: (details) =>
-                                      !_isClearing &&
-                                      details.data >= 0 &&
-                                      details.data < 3,
-                                  onAcceptWithDetails: (details) {
-                                    final idx = details.data;
-                                    if (idx < 0 || idx >= 3) return;
-                                    final piece = _tray[idx];
-                                    if (piece == null) return;
 
-                                    final base = _dragToLocal(details);
-                                    final adjusted = base -
-                                        Offset(0, _liftFor(piece, cell));
+                                      // DragTarget sull'intera area estesa:
+                                      // ORA il hit test copre davvero la
+                                      // zona dropMargin anche in basso.
+                                      Positioned.fill(
+                                        child: DragTarget<int>(
+                                          builder: (context, candidate,
+                                                  rejected) =>
+                                              Container(
+                                                  color: Colors.transparent),
+                                          onMove: (details) {
+                                            if (_isClearing) return;
+                                            if (_selected == null) return;
+                                            final piece =
+                                                _tray[_selected!];
+                                            if (piece == null) return;
+                                            final base =
+                                                _dragToLocal(details);
+                                            final adjusted = base -
+                                                Offset(0,
+                                                    _liftFor(piece, cell));
+                                            final ghost = _ghostForFast(
+                                                piece, adjusted, cell);
+                                            if (setEquals(ghost,
+                                                _ghostNotifier.value)) {
+                                              return;
+                                            }
+                                            _ghostNotifier.value = ghost;
+                                          },
+                                          onWillAcceptWithDetails: (details) =>
+                                              !_isClearing &&
+                                              details.data >= 0 &&
+                                              details.data < 3,
+                                          onAcceptWithDetails: (details) {
+                                            final idx = details.data;
+                                            if (idx < 0 || idx >= 3) return;
+                                            final piece = _tray[idx];
+                                            if (piece == null) return;
 
-                                    // Se il puntatore è troppo lontano dalla
-                                    // griglia, rifiuta con feedback negativo.
-                                    final margin = cell * 1.5;
-                                    if (adjusted.dx < -margin ||
-                                        adjusted.dx > _n * cell + margin ||
-                                        adjusted.dy < -margin ||
-                                        adjusted.dy > _n * cell + margin) {
-                                      HapticFeedback.vibrate();
-                                      _shakeController.forward(from: 0);
-                                      return;
-                                    }
+                                            final base =
+                                                _dragToLocal(details);
+                                            final adjusted = base -
+                                                Offset(0,
+                                                    _liftFor(piece, cell));
 
-                                    var bp = _bestPlacement(
-                                        piece, adjusted, cell);
-                                    if (bp == null) {
-                                      // Fallback: cerca ovunque.
-                                      for (var r0 = 0;
-                                          r0 <= _n - piece.cells.length;
-                                          r0++) {
-                                        for (var c0 = 0;
-                                            c0 <=
-                                                _n - piece.cells[0].length;
-                                            c0++) {
-                                          if (_canPlace(
-                                              piece.cells, r0, c0)) {
-                                            bp = (r0, c0);
-                                            break;
-                                          }
-                                        }
-                                        if (bp != null) break;
-                                      }
-                                    }
-                                    if (bp != null) {
-                                      _placePiece(idx, bp.$1, bp.$2);
-                                    } else {
-                                      HapticFeedback.vibrate();
-                                      _shakeController.forward(from: 0);
-                                    }
-                                  },
+                                            final limit = cell * 2.0;
+                                            if (adjusted.dx < -limit ||
+                                                adjusted.dx >
+                                                    gridSize + limit ||
+                                                adjusted.dy < -limit ||
+                                                adjusted.dy >
+                                                    gridSize + limit) {
+                                              HapticFeedback.vibrate();
+                                              _shakeController.forward(
+                                                  from: 0);
+                                              return;
+                                            }
+
+                                            var bp = _bestPlacement(
+                                                piece, adjusted, cell);
+                                            if (bp == null) {
+                                              for (var r0 = 0;
+                                                  r0 <=
+                                                      _n -
+                                                          piece
+                                                              .cells.length;
+                                                  r0++) {
+                                                for (var c0 = 0;
+                                                    c0 <=
+                                                        _n -
+                                                            piece.cells[0]
+                                                                .length;
+                                                    c0++) {
+                                                  if (_canPlace(
+                                                      piece.cells,
+                                                      r0,
+                                                      c0)) {
+                                                    bp = (r0, c0);
+                                                    break;
+                                                  }
+                                                }
+                                                if (bp != null) break;
+                                              }
+                                            }
+                                            if (bp != null) {
+                                              _placePiece(
+                                                  idx, bp.$1, bp.$2);
+                                            } else {
+                                              HapticFeedback.vibrate();
+                                              _shakeController.forward(
+                                                  from: 0);
+                                            }
+                                          },
+                                        ),
+                                      ),
+
+                                      // Particelle — dentro il sistema di
+                                      // coordinate della griglia.
+                                      if (_isClearing)
+                                        Positioned(
+                                          left: dropMargin,
+                                          top: dropMargin,
+                                          width: gridSize,
+                                          height: gridSize,
+                                          child: IgnorePointer(
+                                            child: AnimatedBuilder(
+                                              animation: _clearController,
+                                              builder: (context, _) => Stack(
+                                                clipBehavior: Clip.none,
+                                                children:
+                                                    _particles.map((p) {
+                                                  final t =
+                                                      _clearController.value;
+                                                  final startX =
+                                                      p.c * cell + cell / 2;
+                                                  final startY =
+                                                      p.r * cell + cell / 2;
+                                                  final dx = cos(p.angle) *
+                                                      t *
+                                                      40;
+                                                  final dy = sin(p.angle) *
+                                                      t *
+                                                      40;
+                                                  return Positioned(
+                                                    left:
+                                                        startX + dx - 8,
+                                                    top: startY + dy - 8,
+                                                    child: Opacity(
+                                                      opacity: (1 - t).clamp(
+                                                          0.0, 1.0),
+                                                      child:
+                                                          Transform.scale(
+                                                        scale: (1 + t * 0.6)
+                                                            .clamp(0.0, 2.0),
+                                                        child: Text(
+                                                          p.emoji,
+                                                          style: TextStyle(
+                                                            fontSize: 16,
+                                                            color: p.color,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             );
                           },
                         ),
+
                         const SizedBox(height: 4),
                         Text(
                           'Trascina i pezzi sulla griglia per piazzarli',
                           style: Theme.of(context).textTheme.bodySmall,
+                          textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 8),
                         Row(
@@ -730,6 +818,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                   ),
                 ),
               ),
+
               // ── Popup punteggio fluttuante ──
               if (_showPopup)
                 Positioned(
@@ -764,45 +853,6 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                  ),
-                ),
-              // ── Particelle di esplosione ──
-              if (_isClearing)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  top: _dropMargin + 10,
-                  child: SizedBox(
-                    height: _n * cell,
-                    child: AnimatedBuilder(
-                      animation: _clearController,
-                      builder: (context, _) => Stack(
-                        children: _particles.map((p) {
-                          final t = _clearController.value;
-                          final startX = p.c * cell + cell / 2;
-                          final startY = p.r * cell + cell / 2;
-                          final dx = cos(p.angle) * t * 40;
-                          final dy = sin(p.angle) * t * 40;
-                          return Positioned(
-                            left: startX + dx - 8,
-                            top: startY + dy - 8,
-                            child: Opacity(
-                              opacity: (1 - t).clamp(0.0, 1.0),
-                              child: Transform.scale(
-                                scale: (1 + t * 0.6).clamp(0.0, 2.0),
-                                child: Text(
-                                  p.emoji,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: p.color,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
                       ),
                     ),
                   ),
@@ -846,10 +896,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
       ),
       child: Draggable<int>(
         data: index,
-        // FIX MOBILE: ancora il feedback al puntatore in modo prevedibile.
-        // Con childDragAnchorStrategy (default) il feedback veniva
-        // posizionato in base al touch point relativo al child piccolo,
-        // causando un mismatch enorme su mobile.
+        // Ancora il feedback al puntatore in modo prevedibile.
         dragAnchorStrategy: pointerDragAnchorStrategy,
         onDragStarted: () {
           HapticFeedback.selectionClick();
@@ -1019,7 +1066,8 @@ class _GridPainter extends CustomPainter {
       Rect.fromCenter(center: Offset.zero, width: half * 2, height: half * 2),
       const Radius.circular(4),
     );
-    canvas.drawRRect(rect, Paint()..color = drawColor.withValues(alpha: opacity));
+    canvas.drawRRect(
+        rect, Paint()..color = drawColor.withValues(alpha: opacity));
     canvas.restore();
   }
 
