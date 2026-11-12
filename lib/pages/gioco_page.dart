@@ -99,9 +99,16 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     if (_gridBox == null || !_gridBox!.hasSize) {
       _gridBox = _gridKey.currentContext?.findRenderObject() as RenderBox?;
     }
-    if (_gridBox == null) return details.offset;
-    final local = _gridBox!.globalToLocal(details.offset);
-    return local - const Offset(2, 2);
+    if (_gridBox == null) {
+      // Fallback: usa l'offset globale (meglio di niente)
+      return details.offset;
+    }
+    try {
+      final local = _gridBox!.globalToLocal(details.offset);
+      return local - const Offset(2, 2);
+    } catch (_) {
+      return details.offset;
+    }
   }
 
   void _restart() {
@@ -534,14 +541,29 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                       _ghostNotifier.value = ghost;
                                     },
                                     onWillAcceptWithDetails: (details) =>
-                                        !_isClearing && _selected != null,
+                                        !_isClearing &&
+                                        details.data >= 0 &&
+                                        details.data < 3,
                                     onAcceptWithDetails: (details) {
-                                      final piece = _tray[_selected!];
+                                      final idx = details.data;
+                                      if (idx < 0 || idx >= 3) return;
+                                      final piece = _tray[idx];
                                       if (piece == null) return;
-                                      final bp = _bestPlacement(
+                                      var bp = _bestPlacement(
                                           piece, _dragToLocal(details), cell);
+                                      if (bp == null) {
+                                        for (var r0 = 0; r0 <= _n - piece.cells.length; r0++) {
+                                          for (var c0 = 0; c0 <= _n - piece.cells[0].length; c0++) {
+                                            if (_canPlace(piece.cells, r0, c0)) {
+                                              bp = (r0, c0);
+                                              break;
+                                            }
+                                          }
+                                          if (bp != null) break;
+                                        }
+                                      }
                                       if (bp != null) {
-                                        _placePiece(_selected!, bp.$1, bp.$2);
+                                        _placePiece(idx, bp.$1, bp.$2);
                                       }
                                     },
                                   ),
