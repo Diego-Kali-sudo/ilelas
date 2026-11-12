@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ILelas - Windows",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "device": "windows"
+    },
+    {
+      "name": "ILelas - Chrome",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "device": "chrome"
+    },
+    {
+      "name": "ILelas - Android (emulatore o telefono USB)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart"
+    }
+  ]
+}
