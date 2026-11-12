@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,6 +18,7 @@ class GiocoPage extends StatefulWidget {
 
 class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
   static const int _n = 8;
+  static const double _dragLift = 12.0;
 
   static const _palette = <Color>[
     Color(0xFFD4AF37),
@@ -43,6 +45,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
   ];
 
   late List<List<Color?>> _grid;
+  int _gridVersion = 0;
+
   late List<_Piece?> _tray;
   int _score = 0;
   int _best = 0;
@@ -50,8 +54,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
   int? _selected;
   bool _gameOver = false;
 
-  final ValueNotifier<List<(int, int)>> _ghostNotifier =
-      ValueNotifier(const []);
+  final ValueNotifier<Set<(int, int)>> _ghostNotifier =
+      ValueNotifier(const {});
 
   late final AnimationController _clearController;
   bool _isClearing = false;
@@ -69,6 +73,9 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
   RenderBox? _gridBox;
 
   final Random _rng = Random();
+
+  late final Listenable _gridRepaint =
+      Listenable.merge([_ghostNotifier, _clearController]);
 
   @override
   void initState() {
@@ -107,10 +114,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     if (_gridBox == null || !_gridBox!.hasSize) {
       _gridBox = _gridKey.currentContext?.findRenderObject() as RenderBox?;
     }
-    if (_gridBox == null) {
-      // Fallback: usa l'offset globale (meglio di niente)
-      return details.offset;
-    }
+    if (_gridBox == null) return details.offset;
     try {
       final local = _gridBox!.globalToLocal(details.offset);
       return local - const Offset(2, 2);
@@ -119,14 +123,21 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     }
   }
 
+  /// Solleva il punto di riferimento del pezzo sopra al dito, come in Block
+  /// Blast: il pezzo "galleggia" sopra al puntatore per lasciare visibilità
+  /// sulle celle di destinazione.
+  double _liftFor(_Piece piece, double cell) =>
+      piece.cells.length * cell / 2 + _dragLift;
+
   void _restart() {
     setState(() {
       _grid = List.generate(_n, (_) => List.filled(_n, null));
+      _gridVersion++;
       _tray = List.filled(3, null);
       _score = 0;
       _comboStreak = 0;
       _selected = null;
-      _ghostNotifier.value = const [];
+      _ghostNotifier.value = const {};
       _gameOver = false;
       _isClearing = false;
       _clearingCells = const [];
@@ -166,9 +177,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     return true;
   }
 
-  // ───────────────────────── RANDOMIZZAZIONE STILE BLOCK BLAST ─────────────────────────
+  // ─────────────────── RANDOMIZZAZIONE STILE BLOCK BLAST ───────────────────
 
-  /// Celle ancora libere nella griglia (0..64).
   int get _freeCells {
     var free = 0;
     for (final row in _grid) {
@@ -179,8 +189,6 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     return free;
   }
 
-  /// Peso di un pezzo: i grandi sono più rari, e lo diventano ancora di più
-  /// man mano che la griglia si riempie.
   int _weightFor(List<List<int>> shape, double freeRatio) {
     final n = _cellCount(shape);
     if (n <= 2) return 4;
@@ -188,7 +196,6 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     return freeRatio < 0.35 ? 1 : 2;
   }
 
-  /// Estrae uno shape casuale con probabilità pesata, evitando i doppioni.
   List<List<int>> _pickShape(List<List<List<int>>> avoid, double freeRatio) {
     final pool = <List<List<int>>>[];
     for (final s in _shapes) {
@@ -205,8 +212,6 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     return pool[_rng.nextInt(pool.length)];
   }
 
-  /// Genera [count] pezzi nuovi, garantendo che almeno uno sia piazzabile
-  /// (anti soft-lock immediato).
   List<_Piece> _generateBatch(int count) {
     final freeRatio = _freeCells / (_n * _n);
     final pieces = <_Piece>[];
@@ -220,9 +225,6 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
         color: _palette[_rng.nextInt(_palette.length)],
       ));
     }
-
-    // Nessuno dei nuovi pezzi entra? Rimpiazza il più grosso con uno
-    // che ci sta davvero.
     if (!pieces.any(_anyPlacement)) {
       final playable =
           _shapes.where(_anyShapePlacement).toList(growable: false);
@@ -302,7 +304,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     return (bestR, bestC!);
   }
 
-  List<(int, int)> _ghostForFast(_Piece piece, Offset local, double cell) {
+  Set<(int, int)> _ghostForFast(_Piece piece, Offset local, double cell) {
     final cols = piece.cells[0].length;
     final rows = piece.cells.length;
     var c0 = (local.dx / cell).floor() - (cols ~/ 2);
@@ -311,8 +313,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     if (r0 < 0) r0 = 0;
     if (c0 > _n - cols) c0 = _n - cols;
     if (r0 > _n - rows) r0 = _n - rows;
-    if (!_canPlace(piece.cells, r0, c0)) return const [];
-    final out = <(int, int)>[];
+    if (!_canPlace(piece.cells, r0, c0)) return const {};
+    final out = <(int, int)>{};
     for (var r = 0; r < rows; r++) {
       for (var c = 0; c < cols; c++) {
         if (piece.cells[r][c] == 1) out.add((r0 + r, c0 + c));
@@ -335,6 +337,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
         }
       }
     }
+    _gridVersion++;
     _tray[trayIndex] = null;
 
     final fullRows = [
@@ -373,7 +376,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
         _score += gained;
         if (_score > _best) _best = _score;
         _selected = null;
-        _ghostNotifier.value = const [];
+        _ghostNotifier.value = const {};
         if (_tray.every((p) => p == null)) _refillTray();
       });
       _showGainPopup(gained);
@@ -408,9 +411,10 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
       _pendingGain = gained;
       _pendingLines = lines;
       _selected = null;
-      _ghostNotifier.value = const [];
+      _ghostNotifier.value = const {};
       _particles = particles;
     });
+    if (lines >= 3) _shakeController.forward(from: 0);
     _clearController.forward(from: 0);
   }
 
@@ -418,6 +422,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     for (final (r, c) in _clearingCells) {
       _grid[r][c] = null;
     }
+    _gridVersion++;
     final lines = _pendingLines;
     final gained = _pendingGain;
     setState(() {
@@ -533,7 +538,6 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
           final mini = (cell * 0.55).floorToDouble();
           return Stack(
             children: [
-              // Sfondo: la faccia del Lelas dietro tutto.
               const Positioned.fill(
                 child: IgnorePointer(
                   child: Opacity(
@@ -575,13 +579,14 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                             ],
                           ),
                         ),
-                        // ── Griglia di gioco ──
+                        // ── Griglia (CustomPaint per prestazioni) ──
                         AnimatedBuilder(
                           animation: _shakeController,
                           builder: (context, _) {
-                            final shakeDx = sin(_shakeController.value * pi * 4) *
-                                6 *
-                                (1 - _shakeController.value);
+                            final shakeDx =
+                                sin(_shakeController.value * pi * 4) *
+                                    6 *
+                                    (1 - _shakeController.value);
                             return Transform.translate(
                               offset: Offset(shakeDx, 0),
                               child: RepaintBoundary(
@@ -602,23 +607,22 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                           ),
                                         ),
                                         padding: EdgeInsets.zero,
-                                        child: ValueListenableBuilder<
-                                            List<(int, int)>>(
-                                          valueListenable: _ghostNotifier,
-                                          builder: (context, ghost, _) =>
-                                              Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              for (var r = 0; r < _n; r++)
-                                                Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    for (var c = 0; c < _n; c++)
-                                                      _cell(r, c, cell),
-                                                  ],
-                                                ),
-                                            ],
+                                        child: SizedBox(
+                                          width: _n * cell,
+                                          height: _n * cell,
+                                          child: CustomPaint(
+                                            painter: _GridPainter(
+                                              grid: _grid,
+                                              gridVersion: _gridVersion,
+                                              ghostListenable:
+                                                  _ghostNotifier,
+                                              clearingCells: _clearingCells,
+                                              clearAnimation:
+                                                  _clearController,
+                                              cellSize: cell,
+                                              n: _n,
+                                              repaint: _gridRepaint,
+                                            ),
                                           ),
                                         ),
                                       );
@@ -628,10 +632,13 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                       if (_selected == null) return;
                                       final piece = _tray[_selected!];
                                       if (piece == null) return;
+                                      final base = _dragToLocal(details);
+                                      final adjusted = base -
+                                          Offset(0, _liftFor(piece, cell));
                                       final ghost = _ghostForFast(
-                                          piece, _dragToLocal(details), cell);
-                                      if (ghost.toString() ==
-                                          _ghostNotifier.value.toString()) {
+                                          piece, adjusted, cell);
+                                      if (setEquals(
+                                          ghost, _ghostNotifier.value)) {
                                         return;
                                       }
                                       _ghostNotifier.value = ghost;
@@ -645,8 +652,11 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                       if (idx < 0 || idx >= 3) return;
                                       final piece = _tray[idx];
                                       if (piece == null) return;
+                                      final base = _dragToLocal(details);
+                                      final adjusted = base -
+                                          Offset(0, _liftFor(piece, cell));
                                       var bp = _bestPlacement(
-                                          piece, _dragToLocal(details), cell);
+                                          piece, adjusted, cell);
                                       if (bp == null) {
                                         for (var r0 = 0;
                                             r0 <= _n - piece.cells.length;
@@ -668,6 +678,9 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                       }
                                       if (bp != null) {
                                         _placePiece(idx, bp.$1, bp.$2);
+                                      } else {
+                                        HapticFeedback.vibrate();
+                                        _shakeController.forward(from: 0);
                                       }
                                     },
                                   ),
@@ -685,7 +698,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
-                            for (var i = 0; i < 3; i++) _traySlot(i, mini),
+                            for (var i = 0; i < 3; i++)
+                              _traySlot(i, mini, cell),
                           ],
                         ),
                         const Spacer(),
@@ -774,85 +788,25 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _cell(int r, int c, double size) {
-    final color = _grid[r][c];
-    final isGhost = _ghostNotifier.value.any((g) => g.$1 == r && g.$2 == c);
-    final isClearing = _clearingCells.contains((r, c));
-    Widget inner;
-    if (isClearing) {
-      inner = TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0.0, end: 1.0),
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeOut,
-        builder: (context, t, _) {
-          final scale = (1.0 - t * 0.75).clamp(0.0, 1.0);
-          final opacity = (1.0 - t).clamp(0.0, 1.0);
-          return Opacity(
-            opacity: opacity,
-            child: Transform.scale(
-              scale: scale,
-              child: Transform.rotate(
-                angle: t * (pi / 4),
-                child: Container(
-                  margin: const EdgeInsets.all(1),
-                  decoration: BoxDecoration(
-                    color: color ?? const Color(0xFFD4AF37),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      );
-    } else if (color != null) {
-      inner = Container(
-        margin: const EdgeInsets.all(1),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(4),
-        ),
-      );
-    } else if (isGhost) {
-      inner = Container(
-        margin: const EdgeInsets.all(1),
-        decoration: BoxDecoration(
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: const Color(0xFFD4AF37),
-            width: 1.5,
-          ),
-        ),
-      );
-    } else {
-      inner = Container(
-        margin: const EdgeInsets.all(1),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.07),
-          borderRadius: BorderRadius.circular(4),
-        ),
-      );
-    }
-    return SizedBox(
-      width: size,
-      height: size,
-      child: inner,
-    );
-  }
-
-  Widget _traySlot(int index, double mini) {
+  Widget _traySlot(int index, double mini, double cell) {
     final piece = _tray[index];
     final selected = _selected == index && piece != null;
+
+    final slotSize = mini * 4.0;
+
     if (piece == null) {
-      return SizedBox(width: mini * 3.4, height: mini * 3.4);
+      return SizedBox(width: slotSize, height: slotSize);
     }
-    final cols = piece.cells[0].length;
-    final rows = piece.cells.length;
-    final w = cols * mini + 4;
-    final h = rows * mini + 4;
+
+    // Feedback a dimensione GRIGLIA (non mini): quello che vedi durante il
+    // drag è esattamente quello che verrà piazzato.
+    final w = piece.cells[0].length * cell;
+    final h = piece.cells.length * cell;
+
     return Container(
-      padding: const EdgeInsets.all(8),
+      key: ValueKey(piece),
+      width: slotSize,
+      height: slotSize,
       decoration: BoxDecoration(
         color: selected
             ? const Color(0xFFD4AF37).withValues(alpha: 0.18)
@@ -863,41 +817,52 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
           width: 2,
         ),
       ),
-      child: SizedBox(
-        width: w,
-        height: h,
-        child: Draggable<int>(
-          data: index,
-          onDragStarted: () {
-            HapticFeedback.selectionClick();
-            setState(() {
-              _selected = index;
-              _ghostNotifier.value = const [];
-            });
-          },
-          onDragEnd: (_) {
-            setState(() {
-              _selected = null;
-              _ghostNotifier.value = const [];
-            });
-          },
-          feedback: Transform.translate(
-            offset: Offset(-w / 2, -h / 2),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: _pieceCells(piece, mini),
-            ),
-          ),
-          childWhenDragging: Opacity(
+      child: Draggable<int>(
+        data: index,
+        onDragStarted: () {
+          HapticFeedback.selectionClick();
+          setState(() {
+            _selected = index;
+            _ghostNotifier.value = const {};
+          });
+        },
+        onDragEnd: (_) {
+          setState(() {
+            _selected = null;
+            _ghostNotifier.value = const {};
+          });
+        },
+        // Feedback: pezzo a dimensione griglia, sollevato sopra al dito.
+        feedback: Transform.translate(
+          offset: Offset(-w / 2, -h - _dragLift),
+          child: _pieceCells(piece, cell - 2),
+        ),
+        childWhenDragging: Center(
+          child: Opacity(
             opacity: 0.3,
             child: FittedBox(
               fit: BoxFit.scaleDown,
               child: _pieceCells(piece, mini),
             ),
           ),
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: _pieceCells(piece, mini),
+        ),
+        // Container trasparente: rende TUTTA l'area dello slot draggabile
+        // (senza, il Draggable farebbe hit-test solo sulle celle del pezzo).
+        child: Container(
+          color: Colors.transparent,
+          alignment: Alignment.center,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.4, end: 1.0),
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutBack,
+            builder: (context, scale, child) => Transform.scale(
+              scale: scale,
+              child: child,
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _pieceCells(piece, mini),
+            ),
           ),
         ),
       ),
@@ -929,6 +894,127 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
           ),
       ],
     );
+  }
+}
+
+/// Painter per la griglia: disegna celle vuote, pezzi, ghost preview e
+/// animazione di clear in un singolo layer. Repaint pilotato da
+/// [_ghostNotifier] e [_clearController] per evitare rebuild di widget
+/// durante il drag e durante l'esplosione.
+class _GridPainter extends CustomPainter {
+  _GridPainter({
+    required this.grid,
+    required this.gridVersion,
+    required this.ghostListenable,
+    required this.clearingCells,
+    required this.clearAnimation,
+    required this.cellSize,
+    required this.n,
+    required Listenable repaint,
+  }) : super(repaint: repaint);
+
+  final List<List<Color?>> grid;
+  final int gridVersion;
+  final ValueListenable<Set<(int, int)>> ghostListenable;
+  final List<(int, int)> clearingCells;
+  final Animation<double> clearAnimation;
+  final double cellSize;
+  final int n;
+
+  static const _goldColor = Color(0xFFD4AF37);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final ghost = ghostListenable.value;
+    final clearProgress = clearAnimation.value;
+    final clearSet = clearingCells.toSet();
+
+    final emptyPaint = Paint()..color = Colors.white.withValues(alpha: 0.07);
+    final ghostFill = Paint()..color = _goldColor.withValues(alpha: 0.35);
+    final ghostBorder = Paint()
+      ..color = _goldColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    // 1) Celle vuote di sfondo (una sola chiamata per cella).
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        if (grid[r][c] == null && !clearSet.contains((r, c))) {
+          canvas.drawRRect(
+            _cellRRect(c, r),
+            emptyPaint,
+          );
+        }
+      }
+    }
+
+    // 2) Ghost preview.
+    for (final (r, c) in ghost) {
+      final rect = _cellRRect(c, r);
+      canvas.drawRRect(rect, ghostFill);
+      canvas.drawRRect(rect, ghostBorder);
+    }
+
+    // 3) Pezzi piazzati (+ animazione clear).
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        final color = grid[r][c];
+        if (color == null) continue;
+
+        if (clearSet.contains((r, c))) {
+          _paintClearingCell(canvas, c, r, color, clearProgress);
+        } else {
+          final paint = Paint()..color = color;
+          canvas.drawRRect(_cellRRect(c, r), paint);
+        }
+      }
+    }
+  }
+
+  void _paintClearingCell(
+    Canvas canvas,
+    int c,
+    int r,
+    Color color,
+    double t,
+  ) {
+    // Flash bianco nei primi 30%, poi scale-down + rotazione + fade.
+    final flash = t < 0.3 ? (t / 0.3) : 0.0;
+    final scale = (1.0 - t * 0.75).clamp(0.0, 1.0);
+    final opacity = (1.0 - t).clamp(0.0, 1.0);
+    final drawColor = Color.lerp(color, Colors.white, flash * 0.85)!;
+
+    final cx = c * cellSize + cellSize / 2;
+    final cy = r * cellSize + cellSize / 2;
+    final half = (cellSize - 2) / 2 * scale;
+
+    canvas.save();
+    canvas.translate(cx, cy);
+    canvas.rotate(t * (pi / 4));
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromCenter(center: Offset.zero, width: half * 2, height: half * 2),
+      const Radius.circular(4),
+    );
+    final paint = Paint()..color = drawColor.withValues(alpha: opacity);
+    canvas.drawRRect(rect, paint);
+    canvas.restore();
+  }
+
+  RRect _cellRRect(int c, int r) => RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          c * cellSize + 1,
+          r * cellSize + 1,
+          cellSize - 2,
+          cellSize - 2,
+        ),
+        const Radius.circular(4),
+      );
+
+  @override
+  bool shouldRepaint(covariant _GridPainter old) {
+    return old.gridVersion != gridVersion ||
+        old.cellSize != cellSize ||
+        old.clearingCells != clearingCells;
   }
 }
 
