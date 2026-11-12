@@ -151,16 +151,32 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     return true;
   }
 
+  final Random _rng = Random();
+
   void _refillTray() {
     for (var i = 0; i < 3; i++) {
       if (_tray[i] != null) continue;
-      final shape = _shapes[DateTime.now().microsecondsSinceEpoch % _shapes.length];
-      final seed = DateTime.now().microsecondsSinceEpoch + i * 7919;
+      // Pezzo casuale: evita di ripetere la stessa forma del vicino.
+      List<List<int>> shape;
+      do {
+        shape = _shapes[_rng.nextInt(_shapes.length)];
+      } while (i > 0 && _tray[i - 1] != null && _sameShape(shape, _tray[i - 1]!.cells));
       _tray[i] = _Piece(
         cells: shape,
-        color: _palette[seed % _palette.length],
+        color: _palette[_rng.nextInt(_palette.length)],
       );
     }
+  }
+
+  bool _sameShape(List<List<int>> a, List<List<int>> b) {
+    if (a.length != b.length) return false;
+    for (var r = 0; r < a.length; r++) {
+      if (a[r].length != b[r].length) return false;
+      for (var c = 0; c < a[r].length; c++) {
+        if (a[r][c] != b[r][c]) return false;
+      }
+    }
+    return true;
   }
 
   (int, int)? _bestPlacement(_Piece piece, Offset local, double cell) {
@@ -343,11 +359,6 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     Future.delayed(const Duration(milliseconds: 900), () {
       if (mounted) setState(() => _showPopup = false);
     });
-  }
-
-  void _triggerShake() {
-    _shakeController.forward(from: 0);
-    HapticFeedback.vibrate();
   }
 
   Future<void> _loadHighScore() async {
@@ -541,7 +552,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Tocca un pezzo e trascinalo sulla griglia (o selezionalo e tocca una cella)',
+                          'Trascina i pezzi sulla griglia per piazzarli',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                         const SizedBox(height: 8),
@@ -700,30 +711,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     return SizedBox(
       width: size,
       height: size,
-      child: GestureDetector(
-        onTap: () {
-          if (_isClearing) return;
-          if (_selected == null) return;
-          HapticFeedback.lightImpact();
-          final piece = _tray[_selected!];
-          if (piece == null) return;
-          final bp = _bestPlacement(
-              piece, Offset((c + 0.5) * size, (r + 0.5) * size), size);
-          if (bp != null) {
-            _placePiece(_selected!, bp.$1, bp.$2);
-          } else {
-            _triggerShake();
-            ScaffoldMessenger.of(context).hideCurrentSnackBar();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Nessuno spazio libero per questo pezzo.'),
-                duration: Duration(milliseconds: 700),
-              ),
-            );
-          }
-        },
-        child: inner,
-      ),
+      child: inner,
     );
   }
 
@@ -737,56 +725,53 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     final rows = piece.cells.length;
     final w = cols * mini + 4;
     final h = rows * mini + 4;
-    return GestureDetector(
-      onTap: () {
-        if (_isClearing) return;
-        setState(() {
-          _selected = selected ? null : index;
-          _ghostNotifier.value = const [];
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFFD4AF37).withValues(alpha: 0.18)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected ? const Color(0xFFD4AF37) : Colors.transparent,
-            width: 2,
-          ),
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: selected
+            ? const Color(0xFFD4AF37).withValues(alpha: 0.18)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: selected ? const Color(0xFFD4AF37) : Colors.transparent,
+          width: 2,
         ),
-        child: SizedBox(
-          width: w,
-          height: h,
-          child: Draggable<int>(
-            data: index,
-            onDragStarted: () {
-              HapticFeedback.selectionClick();
-              setState(() {
-                _selected = index;
-                _ghostNotifier.value = const [];
-              });
-            },
-            feedback: Transform.translate(
-              offset: Offset(-w / 2, -h / 2),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: _pieceCells(piece, mini),
-              ),
-            ),
-            childWhenDragging: Opacity(
-              opacity: 0.3,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: _pieceCells(piece, mini),
-              ),
-            ),
+      ),
+      child: SizedBox(
+        width: w,
+        height: h,
+        child: Draggable<int>(
+          data: index,
+          onDragStarted: () {
+            HapticFeedback.selectionClick();
+            setState(() {
+              _selected = index;
+              _ghostNotifier.value = const [];
+            });
+          },
+          onDragEnd: (_) {
+            setState(() {
+              _selected = null;
+              _ghostNotifier.value = const [];
+            });
+          },
+          feedback: Transform.translate(
+            offset: Offset(-w / 2, -h / 2),
             child: FittedBox(
               fit: BoxFit.scaleDown,
               child: _pieceCells(piece, mini),
             ),
+          ),
+          childWhenDragging: Opacity(
+            opacity: 0.3,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _pieceCells(piece, mini),
+            ),
+          ),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: _pieceCells(piece, mini),
           ),
         ),
       ),
