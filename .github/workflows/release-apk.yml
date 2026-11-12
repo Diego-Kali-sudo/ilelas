@@ -1,0 +1,66 @@
+# ILelas 🗿 — Build automatica dell'APK
+# A ogni push su main compila l'APK release e lo pubblica in GitHub Releases:
+# https://github.com/Diego-Kali-sudo/ilelas/releases/latest
+name: Build & Release APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # avvio manuale dal tab "Actions"
+
+permissions:
+  contents: write   # necessario per creare la Release
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Dipendenze
+        run: flutter pub get
+
+      - name: Analisi statica
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build APK release
+        run: flutter build apk --release
+
+      - name: Leggi la versione
+        id: ver
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
+          BUILD=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build=$BUILD" >> $GITHUB_OUTPUT
+
+      - name: Pubblica Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}+${{ steps.ver.outputs.build }}-${{ github.run_number }}
+          name: ILelas v${{ steps.ver.outputs.version }} (build ${{ github.run_number }})
+          body: |
+            🗿 **ILelas** — build automatica del branch `main`
+
+            - Commit: `${{ github.sha }}`
+            - Versione: v${{ steps.ver.outputs.version }}+${{ steps.ver.outputs.build }}
+
+            Scarica `app-release.apk` qui sotto e installalo sul telefono.
+          files: build/app/outputs/flutter-apk/app-release.apk
+          make_latest: true
