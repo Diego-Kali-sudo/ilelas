@@ -21,7 +21,7 @@ class ILelasApp extends StatelessWidget {
       brightness: Brightness.dark,
     );
     return MaterialApp(
-      title: 'ILelas',
+      title: 'Block Lelas',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: scheme,
