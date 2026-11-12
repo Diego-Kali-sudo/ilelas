@@ -1,0 +1,117 @@
+# Configurazione Codemagic per ILelas 🗿
+# Compila l'app nel cloud macOS senza avere un Mac fisico.
+#
+# Come usarla:
+#  1. Vai su https://codemagic.io e accedi con l'account GitHub
+#  2. "Add application" → seleziona il repo Diego-Kali-sudo/ilelas
+#  3. Nelle impostazioni dell'app scegli "Select workflow from codemagic.yaml"
+#  4. Avvia il workflow che ti serve:
+#     - "ILelas Android"      → APK pronto da installare
+#     - "ILelas iOS (unsigned)" → .app da firmare con Sideloadly/AltStore
+#     - "ILelas iOS Simulatore" → build per il simulatore Xcode
+
+workflows:
+
+  # ─────────────────────────────────────────────────────────────
+  # ANDROID: APK release pronto da installare sul telefono
+  # ─────────────────────────────────────────────────────────────
+  ilelas-android:
+    name: ILelas Android
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      groups:
+        - flutter
+    scripts:
+      - name: Dipendenze
+        script: flutter packages pub get
+      - name: Analisi statica
+        script: flutter analyze
+      - name: Test
+        script: flutter test
+      - name: Build APK release
+        script: flutter build apk --release
+    artifacts:
+      - build/**/outputs/apk/release/*.apk
+    publishing:
+      email:
+        recipients:
+          - diego.kali.sudo@gmail.com   # ← cambia con la tua email
+        notify:
+          success: true
+          failure: true
+
+  # ─────────────────────────────────────────────────────────────
+  # iOS SENZA FIRMA: genera Runner.app non firmato.
+  # Firmalo poi da Windows con Sideloadly/AltServer usando il
+  # tuo Apple ID gratuito (7 giorni di validità, rinnovabile).
+  # ─────────────────────────────────────────────────────────────
+  ilelas-ios-unsigned:
+    name: ILelas iOS (unsigned)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+    scripts:
+      - name: Dipendenze
+        script: flutter packages pub get
+      - name: Analisi statica
+        script: flutter analyze
+      - name: Build iOS senza firma
+        script: |
+          flutter build ipa --release --no-codesign
+      - name: Estrai e comprimi l'app
+        script: |
+          cd build/ios/ipa
+          ls -la
+      - name: Copia l'app firmabile
+        script: |
+          mkdir -p build/ios/exported
+          cp -r build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app build/ios/exported/
+          cd build/ios/exported
+          zip -r ../ilelas-ios-unsigned.zip Runner.app
+    artifacts:
+      - build/**/outputs/apk/release/*.apk
+      - build/ios/*.zip
+    publishing:
+      email:
+        recipients:
+          - diego.kali.sudo@gmail.com   # ← cambia con la tua email
+        notify:
+          success: true
+          failure: true
+
+  # ─────────────────────────────────────────────────────────────
+  # iOS SIMULATORE: build per il simulatore Xcode su un Mac
+  # (nessuna firma necessaria).
+  # ─────────────────────────────────────────────────────────────
+  ilelas-ios-simulator:
+    name: ILelas iOS Simulatore
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+    scripts:
+      - name: Dipendenze
+        script: flutter packages pub get
+      - name: Build per simulatore
+        script: flutter build ios --debug --simulator --no-codesign
+      - name: Comprimi l'app del simulatore
+        script: |
+          mkdir -p build/ios/sim
+          cp -r build/ios/iphonesimulator/Runner.app build/ios/sim/
+          cd build/ios/sim
+          zip -r ../ilelas-ios-simulator.zip Runner.app
+    artifacts:
+      - build/ios/*.zip
+    publishing:
+      email:
+        recipients:
+          - diego.kali.sudo@gmail.com   # ← cambia con la tua email
+        notify:
+          success: true
+          failure: true
