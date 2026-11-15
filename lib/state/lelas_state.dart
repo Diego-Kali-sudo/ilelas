@@ -33,6 +33,9 @@ class LelasState extends ChangeNotifier {
     'lelas_mode': ('🗿 Lelas Mode', 'Pioggia di Lelas attivata.'),
     'maestro_dei_blocchi': ('🧱 Maestro dei Blocchi', '100 punti nel Block Lelas!'),
     'griglia_devastata': ('💥 Griglia Devastata', '3+ righe/colonne in una mossa!'),
+    'surfista_del_duomo': ('🏃 Surfista del Duomo', '300 punti nel Lelas Surf!'),
+    'ceo_maratoneta': ('🥇 CEO Maratoneta', '1000 punti nel Lelas Surf!'),
+    're_del_surf': ('👑 Re del Surf', '2500 punti nel Lelas Surf!'),
   };
 
   /// Sblocca un achievement e ritorna true se è nuovo (per il popup).

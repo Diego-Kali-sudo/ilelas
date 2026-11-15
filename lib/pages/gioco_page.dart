@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../state/lelas_state.dart';
 import '../widgets/lelas_avatar.dart';
+import 'surf_page.dart';
 
 /// BLOCK LELAS 🧱 — minigioco stile Block Blast.
 class GiocoPage extends StatefulWidget {
@@ -523,6 +524,13 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
       appBar: AppBar(
         title: const Text('Block Lelas 🧱'),
         actions: [
+          IconButton(
+            tooltip: 'Lelas Surf',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SurfPage()),
+            ),
+            icon: const Icon(Icons.directions_run),
+          ),
           IconButton(
             tooltip: 'Ricomincia',
             onPressed: _gameOver ? null : _restart,
