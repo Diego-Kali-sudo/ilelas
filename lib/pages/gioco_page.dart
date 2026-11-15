@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../state/lelas_state.dart';
 import '../widgets/lelas_avatar.dart';
+import 'surf3d_page.dart';
 import 'surf_page.dart';
 
 /// BLOCK LELAS 🧱 — minigioco stile Block Blast.
@@ -30,18 +31,54 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
   ];
 
   static const _shapes = <List<List<int>>>[
-    [[1]],
-    [[1, 1]],
-    [[1], [1]],
-    [[1, 1, 1]],
-    [[1], [1], [1]],
-    [[1, 1], [1, 1]],
-    [[1, 0], [1, 1]],
-    [[0, 1], [1, 1]],
-    [[1, 1, 1], [1, 1, 1]],
-    [[1, 1, 1], [0, 1, 0]],
-    [[1, 1], [0, 1], [0, 1]],
-    [[1, 1], [1, 0], [1, 0]],
+    [
+      [1],
+    ],
+    [
+      [1, 1],
+    ],
+    [
+      [1],
+      [1],
+    ],
+    [
+      [1, 1, 1],
+    ],
+    [
+      [1],
+      [1],
+      [1],
+    ],
+    [
+      [1, 1],
+      [1, 1],
+    ],
+    [
+      [1, 0],
+      [1, 1],
+    ],
+    [
+      [0, 1],
+      [1, 1],
+    ],
+    [
+      [1, 1, 1],
+      [1, 1, 1],
+    ],
+    [
+      [1, 1, 1],
+      [0, 1, 0],
+    ],
+    [
+      [1, 1],
+      [0, 1],
+      [0, 1],
+    ],
+    [
+      [1, 1],
+      [1, 0],
+      [1, 0],
+    ],
   ];
 
   late List<List<Color?>> _grid;
@@ -54,8 +91,7 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
   int? _selected;
   bool _gameOver = false;
 
-  final ValueNotifier<Set<(int, int)>> _ghostNotifier =
-      ValueNotifier(const {});
+  final ValueNotifier<Set<(int, int)>> _ghostNotifier = ValueNotifier(const {});
 
   late final AnimationController _clearController;
   bool _isClearing = false;
@@ -74,8 +110,10 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
 
   final Random _rng = Random();
 
-  late final Listenable _gridRepaint =
-      Listenable.merge([_ghostNotifier, _clearController]);
+  late final Listenable _gridRepaint = Listenable.merge([
+    _ghostNotifier,
+    _clearController,
+  ]);
 
   @override
   void initState() {
@@ -216,18 +254,15 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     final freeRatio = _freeCells / (_n * _n);
     final pieces = <_Piece>[];
     for (var i = 0; i < count; i++) {
-      final shape = _pickShape(
-        [for (final p in pieces) p.cells],
-        freeRatio,
+      final shape = _pickShape([for (final p in pieces) p.cells], freeRatio);
+      pieces.add(
+        _Piece(cells: shape, color: _palette[_rng.nextInt(_palette.length)]),
       );
-      pieces.add(_Piece(
-        cells: shape,
-        color: _palette[_rng.nextInt(_palette.length)],
-      ));
     }
     if (!pieces.any(_anyPlacement)) {
-      final playable =
-          _shapes.where(_anyShapePlacement).toList(growable: false);
+      final playable = _shapes
+          .where(_anyShapePlacement)
+          .toList(growable: false);
       if (playable.isNotEmpty) {
         var worst = 0;
         for (var i = 1; i < pieces.length; i++) {
@@ -291,7 +326,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
         if (!_canPlace(piece.cells, r0, c0)) continue;
         final cx = (c0 + cols / 2) * cell;
         final cy = (r0 + rows / 2) * cell;
-        final d = (cx - local.dx) * (cx - local.dx) +
+        final d =
+            (cx - local.dx) * (cx - local.dx) +
             (cy - local.dy) * (cy - local.dy);
         if (d < bestDist) {
           bestDist = d;
@@ -365,7 +401,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     }
 
     _comboStreak = lines == 0 ? 0 : _comboStreak + lines;
-    final gained = placedCells * 3 +
+    final gained =
+        placedCells * 3 +
         lines * 10 * (lines == 0 ? 0 : lines) +
         _comboStreak * 2 +
         (lines >= 2 ? 20 * lines : 0);
@@ -394,13 +431,15 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
     for (final (r, c) in clearing) {
       final color = _grid[r][c] ?? const Color(0xFFD4AF37);
       for (var i = 0; i < 2; i++) {
-        particles.add(_Particle(
-          r: r,
-          c: c,
-          angle: rng.nextDouble() * 2 * pi,
-          color: color,
-          emoji: rng.nextBool() ? '✨' : '💥',
-        ));
+        particles.add(
+          _Particle(
+            r: r,
+            c: c,
+            angle: rng.nextDouble() * 2 * pi,
+            color: color,
+            emoji: rng.nextBool() ? '✨' : '💥',
+          ),
+        );
       }
     }
 
@@ -441,12 +480,14 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
       final msg = lines >= 3
           ? '💥 GRIGLIA DEVASTATA! +$gained'
           : lines == 2
-              ? '✨ Doppia esplosione! +$gained'
-              : '⌚ Linea pulita dal Lelas! +$gained';
+          ? '✨ Doppia esplosione! +$gained'
+          : '⌚ Linea pulita dal Lelas! +$gained';
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(msg), duration: const Duration(milliseconds: 900)),
+          content: Text(msg),
+          duration: const Duration(milliseconds: 900),
+        ),
       );
     }
 
@@ -524,12 +565,21 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
       appBar: AppBar(
         title: const Text('Block Lelas 🧱'),
         actions: [
-          IconButton(
+          PopupMenuButton<String>(
             tooltip: 'Lelas Surf',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SurfPage()),
-            ),
             icon: const Icon(Icons.directions_run),
+            onSelected: (value) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      value == '3d' ? const Surf3DPage() : const SurfPage(),
+                ),
+              );
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: '3d', child: Text('🏙️ Lelas Surf 3D')),
+              PopupMenuItem(value: '2d', child: Text('🏃 Lelas Surf 2D')),
+            ],
           ),
           IconButton(
             tooltip: 'Ricomincia',
@@ -574,15 +624,15 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                       children: [
                         Padding(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 8),
+                            horizontal: 20,
+                            vertical: 8,
+                          ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
                                 'PUNTI: $_score',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleLarge
+                                style: Theme.of(context).textTheme.titleLarge
                                     ?.copyWith(
                                       fontWeight: FontWeight.bold,
                                       color: const Color(0xFFD4AF37),
@@ -605,8 +655,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                           builder: (context, _) {
                             final shakeDx =
                                 sin(_shakeController.value * pi * 4) *
-                                    6 *
-                                    (1 - _shakeController.value);
+                                6 *
+                                (1 - _shakeController.value);
                             return Transform.translate(
                               offset: Offset(shakeDx, 0),
                               child: RepaintBoundary(
@@ -624,10 +674,12 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                         child: Container(
                                           key: _gridKey,
                                           decoration: BoxDecoration(
-                                            color: Colors.black
-                                                .withValues(alpha: 0.20),
-                                            borderRadius:
-                                                BorderRadius.circular(12),
+                                            color: Colors.black.withValues(
+                                              alpha: 0.20,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
                                             border: Border.all(
                                               color: const Color(0xFFD4AF37),
                                               width: 2,
@@ -637,11 +689,9 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                             painter: _GridPainter(
                                               grid: _grid,
                                               gridVersion: _gridVersion,
-                                              ghostListenable:
-                                                  _ghostNotifier,
+                                              ghostListenable: _ghostNotifier,
                                               clearingCells: _clearingCells,
-                                              clearAnimation:
-                                                  _clearController,
+                                              clearAnimation: _clearController,
                                               cellSize: cell,
                                               n: _n,
                                               repaint: _gridRepaint,
@@ -655,25 +705,32 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                       // zona dropMargin anche in basso.
                                       Positioned.fill(
                                         child: DragTarget<int>(
-                                          builder: (context, candidate,
-                                                  rejected) =>
-                                              Container(
-                                                  color: Colors.transparent),
+                                          builder:
+                                              (context, candidate, rejected) =>
+                                                  Container(
+                                                    color: Colors.transparent,
+                                                  ),
                                           onMove: (details) {
                                             if (_isClearing) return;
                                             if (_selected == null) return;
-                                            final piece =
-                                                _tray[_selected!];
+                                            final piece = _tray[_selected!];
                                             if (piece == null) return;
-                                            final base =
-                                                _dragToLocal(details);
-                                            final adjusted = base -
-                                                Offset(0,
-                                                    _liftFor(piece, cell));
+                                            final base = _dragToLocal(details);
+                                            final adjusted =
+                                                base -
+                                                Offset(
+                                                  0,
+                                                  _liftFor(piece, cell),
+                                                );
                                             final ghost = _ghostForFast(
-                                                piece, adjusted, cell);
-                                            if (setEquals(ghost,
-                                                _ghostNotifier.value)) {
+                                              piece,
+                                              adjusted,
+                                              cell,
+                                            );
+                                            if (setEquals(
+                                              ghost,
+                                              _ghostNotifier.value,
+                                            )) {
                                               return;
                                             }
                                             _ghostNotifier.value = ghost;
@@ -688,11 +745,13 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                             final piece = _tray[idx];
                                             if (piece == null) return;
 
-                                            final base =
-                                                _dragToLocal(details);
-                                            final adjusted = base -
-                                                Offset(0,
-                                                    _liftFor(piece, cell));
+                                            final base = _dragToLocal(details);
+                                            final adjusted =
+                                                base -
+                                                Offset(
+                                                  0,
+                                                  _liftFor(piece, cell),
+                                                );
 
                                             final limit = cell * 2.0;
                                             if (adjusted.dx < -limit ||
@@ -702,30 +761,33 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                                 adjusted.dy >
                                                     gridSize + limit) {
                                               HapticFeedback.vibrate();
-                                              _shakeController.forward(
-                                                  from: 0);
+                                              _shakeController.forward(from: 0);
                                               return;
                                             }
 
                                             var bp = _bestPlacement(
-                                                piece, adjusted, cell);
+                                              piece,
+                                              adjusted,
+                                              cell,
+                                            );
                                             if (bp == null) {
-                                              for (var r0 = 0;
-                                                  r0 <=
+                                              for (
+                                                var r0 = 0;
+                                                r0 <= _n - piece.cells.length;
+                                                r0++
+                                              ) {
+                                                for (
+                                                  var c0 = 0;
+                                                  c0 <=
                                                       _n -
-                                                          piece
-                                                              .cells.length;
-                                                  r0++) {
-                                                for (var c0 = 0;
-                                                    c0 <=
-                                                        _n -
-                                                            piece.cells[0]
-                                                                .length;
-                                                    c0++) {
+                                                          piece.cells[0].length;
+                                                  c0++
+                                                ) {
                                                   if (_canPlace(
-                                                      piece.cells,
-                                                      r0,
-                                                      c0)) {
+                                                    piece.cells,
+                                                    r0,
+                                                    c0,
+                                                  )) {
                                                     bp = (r0, c0);
                                                     break;
                                                   }
@@ -734,12 +796,10 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                               }
                                             }
                                             if (bp != null) {
-                                              _placePiece(
-                                                  idx, bp.$1, bp.$2);
+                                              _placePiece(idx, bp.$1, bp.$2);
                                             } else {
                                               HapticFeedback.vibrate();
-                                              _shakeController.forward(
-                                                  from: 0);
+                                              _shakeController.forward(from: 0);
                                             }
                                           },
                                         ),
@@ -758,29 +818,26 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
                                               animation: _clearController,
                                               builder: (context, _) => Stack(
                                                 clipBehavior: Clip.none,
-                                                children:
-                                                    _particles.map((p) {
+                                                children: _particles.map((p) {
                                                   final t =
                                                       _clearController.value;
                                                   final startX =
                                                       p.c * cell + cell / 2;
                                                   final startY =
                                                       p.r * cell + cell / 2;
-                                                  final dx = cos(p.angle) *
-                                                      t *
-                                                      40;
-                                                  final dy = sin(p.angle) *
-                                                      t *
-                                                      40;
+                                                  final dx =
+                                                      cos(p.angle) * t * 40;
+                                                  final dy =
+                                                      sin(p.angle) * t * 40;
                                                   return Positioned(
-                                                    left:
-                                                        startX + dx - 8,
+                                                    left: startX + dx - 8,
                                                     top: startY + dy - 8,
                                                     child: Opacity(
                                                       opacity: (1 - t).clamp(
-                                                          0.0, 1.0),
-                                                      child:
-                                                          Transform.scale(
+                                                        0.0,
+                                                        1.0,
+                                                      ),
+                                                      child: Transform.scale(
                                                         scale: (1 + t * 0.6)
                                                             .clamp(0.0, 2.0),
                                                         child: Text(
@@ -942,10 +999,8 @@ class _GiocoPageState extends State<GiocoPage> with TickerProviderStateMixin {
             tween: Tween(begin: 0.4, end: 1.0),
             duration: const Duration(milliseconds: 260),
             curve: Curves.easeOutBack,
-            builder: (context, scale, child) => Transform.scale(
-              scale: scale,
-              child: child,
-            ),
+            builder: (context, scale, child) =>
+                Transform.scale(scale: scale, child: child),
             child: FittedBox(
               fit: BoxFit.scaleDown,
               child: _pieceCells(piece, mini),
@@ -1051,13 +1106,7 @@ class _GridPainter extends CustomPainter {
     }
   }
 
-  void _paintClearingCell(
-    Canvas canvas,
-    int c,
-    int r,
-    Color color,
-    double t,
-  ) {
+  void _paintClearingCell(Canvas canvas, int c, int r, Color color, double t) {
     final flash = t < 0.3 ? (t / 0.3) : 0.0;
     final scale = (1.0 - t * 0.75).clamp(0.0, 1.0);
     final opacity = (1.0 - t).clamp(0.0, 1.0);
@@ -1075,19 +1124,21 @@ class _GridPainter extends CustomPainter {
       const Radius.circular(4),
     );
     canvas.drawRRect(
-        rect, Paint()..color = drawColor.withValues(alpha: opacity));
+      rect,
+      Paint()..color = drawColor.withValues(alpha: opacity),
+    );
     canvas.restore();
   }
 
   RRect _cellRRect(int c, int r) => RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          c * cellSize + 1,
-          r * cellSize + 1,
-          cellSize - 2,
-          cellSize - 2,
-        ),
-        const Radius.circular(4),
-      );
+    Rect.fromLTWH(
+      c * cellSize + 1,
+      r * cellSize + 1,
+      cellSize - 2,
+      cellSize - 2,
+    ),
+    const Radius.circular(4),
+  );
 
   @override
   bool shouldRepaint(covariant _GridPainter old) {
