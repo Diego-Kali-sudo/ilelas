@@ -94,6 +94,7 @@ class _Surf3DPageState extends State<Surf3DPage>
       );
       final frame = await codec.getNextFrame();
       if (!mounted) return;
+      _world.avatar = frame.image;
       setState(() => _avatar = frame.image);
     } catch (_) {
       // Senza foto si gioca lo stesso.
@@ -417,7 +418,7 @@ class _Surf3DPageState extends State<Surf3DPage>
 
   Widget _deadOverlay(BuildContext context) {
     return Container(
-      color: Colors.black.withValues(alpha: 0.66),
+      color: Colors.black.withValues(alpha: 0.56),
       child: Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -524,15 +525,15 @@ enum _ObjKind { crate, gate, wall, coin }
 class _Obj {
   _Obj({required this.kind, required this.lane, required this.z, this.lift = 0})
     : w = switch (kind) {
-        _ObjKind.crate => 0.80,
-        _ObjKind.gate => 0.98,
-        _ObjKind.wall => 0.90,
+        _ObjKind.crate => 0.86,
+        _ObjKind.gate => 1.04,
+        _ObjKind.wall => 0.94,
         _ObjKind.coin => 0.30,
       },
       h = switch (kind) {
-        _ObjKind.crate => 0.55,
-        _ObjKind.gate => 0.48,
-        _ObjKind.wall => 1.65,
+        _ObjKind.crate => 0.58,
+        _ObjKind.gate => 0.52,
+        _ObjKind.wall => 1.70,
         _ObjKind.coin => 0.30,
       },
       depth = switch (kind) {
@@ -541,7 +542,7 @@ class _Obj {
         _ObjKind.wall => 0.55,
         _ObjKind.coin => 0.30,
       },
-      yBottom = kind == _ObjKind.gate ? 0.80 : 0.0;
+      yBottom = kind == _ObjKind.gate ? 1.05 : 0.0;
 
   final _ObjKind kind;
   final double lane;
@@ -593,9 +594,9 @@ class _World3D {
   double camH = 0;
   double lanePx = 0;
 
-  static const double _focal = 3.2;
+  static const double _focal = 5.0;
   static const double _playerZ = 0.55;
-  static const double _maxZ = 42.0;
+  static const double _maxZ = 34.0;
 
   double t = 0;
   double travelled = 0;
@@ -623,10 +624,19 @@ class _World3D {
 
   double _nextRow = 0;
   double _nextScenery = 0;
+  double _nextLamp = 0;
+  double _nextTree = 0;
+  double _lampSide = 1;
+  double _treeSide = 1;
   double _shake = 0;
   double _flash = 0;
+  double _dust = 0;
+
+  /// La faccia del Lelas, decodificata una volta sola.
+  ui.Image? avatar;
 
   List<_SkyBuilding> _skyline = [];
+  List<_SkyBuilding> _skylineFar = [];
   List<Offset> _stars = [];
 
   static const List<String> _quotes = [
@@ -668,6 +678,16 @@ class _World3D {
       _skyline.add(_SkyBuilding(x, bw, 0.15 + r.nextDouble() * 0.55));
       x += bw + 0.005 + r.nextDouble() * 0.01;
     }
+
+    // Secondo profilo, più lontano e più basso: dà profondità.
+    final fr = Random(29);
+    _skylineFar = [];
+    x = 0.0;
+    while (x < 1.0) {
+      final bw = 0.03 + fr.nextDouble() * 0.05;
+      _skylineFar.add(_SkyBuilding(x, bw, 0.08 + fr.nextDouble() * 0.30));
+      x += bw + 0.004 + fr.nextDouble() * 0.012;
+    }
   }
 
   void start() {
@@ -691,8 +711,13 @@ class _World3D {
       _spawnRow(atZ: 17.0 + i * 9.0);
     }
     _nextRow = speed * 1.5;
+    _nextLamp = 4.0;
+    _nextTree = 2.0;
+    _lampSide = 1;
+    _treeSide = -1;
     _shake = 0;
     _flash = 0;
+    _dust = 0;
   }
 
   double get difficulty => min(1.0, distance / 220.0);
@@ -743,6 +768,7 @@ class _World3D {
       _updatePlayer(dt);
       _updateSpawn(dt);
       _updateObjects(dt);
+      _spawnDust(dt);
       score = (distance * 2.4).floor() + coins * 10;
     } else {
       speed = 2.6;
@@ -880,20 +906,50 @@ class _World3D {
   void _updateScenery(double dt) {
     _nextScenery -= speed * dt;
     if (_nextScenery <= 0) {
-      _nextScenery = 3.2 + _rng.nextDouble() * 2.4;
+      _nextScenery = 2.4 + _rng.nextDouble() * 2.0;
       final side = _rng.nextBool() ? -1.0 : 1.0;
-      final kind = _rng.nextDouble() < 0.72
+      final kind = _rng.nextDouble() < 0.76
           ? _SceneryKind.palazzo
-          : (_rng.nextBool() ? _SceneryKind.cipresso : _SceneryKind.lampione);
+          : _SceneryKind.cipresso;
       scenery.add(
         _Scenery(
           z: _maxZ,
           side: side,
           height: kind == _SceneryKind.palazzo
-              ? 1.8 + _rng.nextDouble() * 3.2
+              ? 1.4 + _rng.nextDouble() * 2.2
               : 1.2,
           kind: kind,
           tone: _rng.nextDouble(),
+        ),
+      );
+    }
+
+    // Lampioni regolari, alternati: una fila di luci che scorta la strada.
+    _nextLamp -= speed * dt;
+    if (_nextLamp <= 0) {
+      _nextLamp = 6.0;
+      _lampSide = -_lampSide;
+      scenery.add(
+        _Scenery(
+          z: _maxZ,
+          side: _lampSide,
+          height: 1.9,
+          kind: _SceneryKind.lampione,
+        ),
+      );
+    }
+
+    // Cipressi in fila: riempiono i lati e danno il ritmo della corsa.
+    _nextTree -= speed * dt;
+    if (_nextTree <= 0) {
+      _nextTree = 9.0;
+      _treeSide = -_treeSide;
+      scenery.add(
+        _Scenery(
+          z: _maxZ,
+          side: _treeSide,
+          height: 1.3,
+          kind: _SceneryKind.cipresso,
         ),
       );
     }
@@ -913,6 +969,28 @@ class _World3D {
   }
 
   // ── Particelle ───────────────────────────────────────────────────────────
+
+  /// Polvere d'oro sotto le scarpe: dà il ritmo della corsa.
+  void _spawnDust(double dt) {
+    if (!onGround) return;
+    _dust -= dt;
+    if (_dust > 0) return;
+    _dust = 0.085;
+    final s = scaleAt(_playerZ);
+    particles.add(
+      _P3(
+        x:
+            screenX(laneX, _playerZ) +
+            (_rng.nextDouble() - 0.5) * 0.5 * lanePx * s,
+        y: groundYAt(_playerZ) + 2,
+        vx: (_rng.nextDouble() - 0.5) * 50 * s,
+        vy: -18 - _rng.nextDouble() * 26,
+        life: 0.26 + _rng.nextDouble() * 0.22,
+        size: 2 + _rng.nextDouble() * 2.4,
+        color: _kGoldLight3D.withValues(alpha: 0.55),
+      ),
+    );
+  }
 
   void _puff(int n) {
     final s = scaleAt(_playerZ);
@@ -965,6 +1043,14 @@ class _World3D {
   // ── Disegno ──────────────────────────────────────────────────────────────
 
   final Paint _p = Paint();
+
+  /// I riempimenti con gradiente vengono moltiplicati per l'alpha di
+  /// Paint.color: se resta quello di un disegno precedente il gradiente
+  /// esce slavato. Quindi dopo ogni shader si riporta il colore opaco.
+  void _clearShader() {
+    _p.shader = null;
+    _p.color = const Color(0xFFFFFFFF);
+  }
   final Paint _line = Paint()
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.round;
@@ -986,6 +1072,19 @@ class _World3D {
 
     if (_shake > 0.1) canvas.restore();
 
+    // Vignettatura: lo sguardo resta sul centro della corsia.
+    _p.shader = ui.Gradient.radial(
+      Offset(w / 2, h * 0.60),
+      max(w, h) * 0.78,
+      [
+        Colors.black.withValues(alpha: 0.0),
+        Colors.black.withValues(alpha: 0.26),
+      ],
+      const [0.58, 1.0],
+    );
+    canvas.drawRect(Rect.fromLTWH(0, 0, w, h), _p);
+    _clearShader();
+
     if (_flash > 0.01) {
       canvas.drawRect(
         Rect.fromLTWH(0, 0, w, h),
@@ -1004,7 +1103,7 @@ class _World3D {
     );
     _p.shader = grad;
     canvas.drawRect(Rect.fromLTWH(0, 0, w, horizonY + 2), _p);
-    _p.shader = null;
+    _clearShader();
 
     // Bagliore dorato sull'orizzonte (oro trasparente, non nero).
     final glow = ui.Gradient.radial(
@@ -1019,7 +1118,7 @@ class _World3D {
     );
     _p.shader = glow;
     canvas.drawRect(Rect.fromLTWH(0, 0, w, horizonY), _p);
-    _p.shader = null;
+    _clearShader();
 
     // Stelle
     for (var i = 0; i < _stars.length; i++) {
@@ -1029,22 +1128,79 @@ class _World3D {
       canvas.drawCircle(Offset(star.dx * w, star.dy * horizonY), 1.0, _p);
     }
 
-    // Luna bassa
-    _p.color = const Color(0xFFFFF3C4).withValues(alpha: 0.9);
-    canvas.drawCircle(Offset(w * 0.78, horizonY * 0.34), h * 0.030, _p);
-    _p.color = const Color(0xFFFFF3C4).withValues(alpha: 0.09);
-    canvas.drawCircle(Offset(w * 0.78, horizonY * 0.34), h * 0.070, _p);
+    // Nuvole basse: solo un velo, senza bordi netti.
+    _p.color = Colors.white.withValues(alpha: 0.012);
+    canvas.drawOval(
+      Rect.fromLTWH(w * 0.02, horizonY * 0.50, w * 0.55, horizonY * 0.11),
+      _p,
+    );
+    canvas.drawOval(
+      Rect.fromLTWH(w * 0.44, horizonY * 0.64, w * 0.62, horizonY * 0.10),
+      _p,
+    );
+
+    // Luna bassa: alone morbido in gradiente, non un disco grigio.
+    final moonC = Offset(w * 0.78, horizonY * 0.34);
+    final moonR = h * 0.030;
+    _p.color = const Color(0xFFFFFFFF);
+    _p.shader = ui.Gradient.radial(moonC, moonR * 4.2, [
+      const Color(0xFFFFF3C4).withValues(alpha: 0.24),
+      const Color(0xFFFFF3C4).withValues(alpha: 0.08),
+      const Color(0xFFFFF3C4).withValues(alpha: 0.0),
+    ], const [0.0, 0.38, 1.0]);
+    canvas.drawCircle(moonC, moonR * 4.2, _p);
+    _clearShader();
+
+    _p.color = const Color(0xFFFFF6D2);
+    canvas.drawCircle(moonC, moonR, _p);
+    // Bordo leggermente più caldo: dà volume al disco.
+    _p.color = const Color(0xFFFFE9A8).withValues(alpha: 0.65);
+    canvas.drawCircle(moonC, moonR * 1.06, _p);
+    _p.color = const Color(0xFFFFF6D2);
+    canvas.drawCircle(moonC, moonR * 0.92, _p);
   }
 
   void _paintSkyline(Canvas canvas) {
-    final shift = (laneX * 26 + travelled * 0.9) % w;
-    _p.color = const Color(0xFF1A1330);
-    for (final b in _skyline) {
-      final bx = b.x * w * 1.6 - shift;
+    // Profilo lontano, più lento: parallasse.
+    final farShift = (laneX * 12 + travelled * 0.42) % w;
+    _p.color = const Color(0xFF130E26);
+    for (final b in _skylineFar) {
+      final bx = b.x * w * 1.6 - farShift;
       final bw = b.w * w * 1.6;
       final bh = b.h * h * 0.16;
       if (bx + bw < -40 || bx > w + 40) continue;
       canvas.drawRect(Rect.fromLTWH(bx, horizonY - bh, bw, bh + 2), _p);
+    }
+
+    final shift = (laneX * 26 + travelled * 0.9) % w;
+    for (var i = 0; i < _skyline.length; i++) {
+      final b = _skyline[i];
+      final bx = b.x * w * 1.6 - shift;
+      final bw = b.w * w * 1.6;
+      final bh = b.h * h * 0.16;
+      if (bx + bw < -40 || bx > w + 40) continue;
+      _p.color = const Color(0xFF1E1638);
+      canvas.drawRect(Rect.fromLTWH(bx, horizonY - bh, bw, bh + 2), _p);
+
+      // Qualche finestra accesa nel profilo della città.
+      if (bw > 7) {
+        final cols = (bw / 6).floor().clamp(1, 4);
+        for (var c = 0; c < cols; c++) {
+          for (var r = 0; r < 3; r++) {
+            if ((i + c * 3 + r * 5) % 4 != 0) continue;
+            _p.color = const Color(0xFFFFD98A).withValues(alpha: 0.22);
+            canvas.drawRect(
+              Rect.fromLTWH(
+                bx + 2 + c * (bw - 3) / cols,
+                horizonY - bh + 5 + r * 10,
+                1.6,
+                2.6,
+              ),
+              _p,
+            );
+          }
+        }
+      }
     }
     // Duomo stilizzato al centro-sinistra
     final cx = w * 0.22 - (shift % w) * 0.02;
@@ -1080,27 +1236,112 @@ class _World3D {
     );
     _p.shader = fog;
     canvas.drawRect(Rect.fromLTWH(0, horizonY - h * 0.10, w, h * 0.15), _p);
-    _p.shader = null;
+    _clearShader();
+
+    // Controluce caldo proprio sulla linea dell'orizzonte: il fondo strada
+    // non è più un buco nero.
+    _p.shader = ui.Gradient.linear(
+      Offset(0, horizonY - h * 0.04),
+      Offset(0, horizonY + h * 0.09),
+      [
+        const Color(0xFFFFB870).withValues(alpha: 0.0),
+        const Color(0xFFFFB870).withValues(alpha: 0.22),
+        const Color(0xFFFFB870).withValues(alpha: 0.0),
+      ],
+      const [0.0, 0.35, 1.0],
+    );
+    canvas.drawRect(Rect.fromLTWH(0, horizonY - h * 0.04, w, h * 0.13), _p);
+    _clearShader();
   }
 
   void _paintGround(Canvas canvas) {
-    // Prato/terreno oltre la strada
-    final ground = ui.Gradient.linear(Offset(0, horizonY), Offset(0, h), const [
-      Color(0xFF120E1D),
-      Color(0xFF070610),
+    // Terreno oltre la strada
+    _p.shader = ui.Gradient.linear(Offset(0, horizonY), Offset(0, h), const [
+      Color(0xFF1A1428),
+      Color(0xFF0A0814),
     ]);
-    _p.shader = ground;
     canvas.drawRect(Rect.fromLTWH(0, horizonY, w, h - horizonY), _p);
-    _p.shader = null;
+    _clearShader();
 
     // Marciapiedi
-    _quad(canvas, -2.9, 2.9, _maxZ, 0, const Color(0xFF211A2E));
+    _quad(canvas, -2.9, 2.9, _maxZ, 0, const Color(0xFF282139));
     // Strada
-    _quad(canvas, -1.8, 1.8, _maxZ, 0, const Color(0xFF16111F));
+    _quad(canvas, -1.8, 1.8, _maxZ, 0, const Color(0xFF241E36));
 
-    // Bordi dorati
-    _groundLine(canvas, -1.8, const Color(0x55D4AF37), 0.05);
-    _groundLine(canvas, 1.8, const Color(0x55D4AF37), 0.05);
+    // Cordoncino del marciapiede: stacca la strada dal resto.
+    _groundLine(canvas, -1.82, Colors.white.withValues(alpha: 0.10), 0.04);
+    _groundLine(canvas, 1.82, Colors.white.withValues(alpha: 0.10), 0.04);
+
+    // Chiarore lunare: il centro della strada non è più un buco nero.
+    _p.shader = ui.Gradient.radial(
+      Offset(w * 0.5, h * 0.70),
+      w * 0.90,
+      [
+        Colors.white.withValues(alpha: 0.09),
+        _kGold3D.withValues(alpha: 0.05),
+        _kGold3D.withValues(alpha: 0.0),
+      ],
+      const [0.0, 0.55, 1.0],
+    );
+    canvas.drawRect(Rect.fromLTWH(0, horizonY, w, h - horizonY), _p);
+    _clearShader();
+
+    // Fondo strada: una luce calda sul punto di fuga, così davanti non c'è
+    // più un buco nero.
+    final vanish = Offset(w * 0.5, groundYAt(_maxZ));
+    _p.color = const Color(0xFFFFFFFF);
+    _p.shader = ui.Gradient.radial(vanish, w * 0.24, [
+      const Color(0xFFFFC98A).withValues(alpha: 0.16),
+      _kGold3D.withValues(alpha: 0.06),
+      _kGold3D.withValues(alpha: 0.0),
+    ], const [0.0, 0.42, 1.0]);
+    canvas.drawRect(Rect.fromLTWH(0, horizonY, w, h - horizonY), _p);
+    _clearShader();
+
+    // Fughe delle pietre sui marciapiedi: danno il senso della velocità.
+    const joint = 2.2;
+    final jFirst = (travelled / joint).floor();
+    final jLast = ((travelled + _maxZ) / joint).ceil();
+    _line
+      ..color = Colors.black.withValues(alpha: 0.32)
+      ..strokeWidth = 1.2;
+    for (var k = jFirst; k <= jLast; k++) {
+      final z = k * joint - travelled;
+      if (z < 0 || z > _maxZ) continue;
+      final y = groundYAt(z);
+      canvas.drawLine(
+        Offset(screenX(-2.9, z), y),
+        Offset(screenX(-1.82, z), y),
+        _line,
+      );
+      canvas.drawLine(
+        Offset(screenX(1.82, z), y),
+        Offset(screenX(2.9, z), y),
+        _line,
+      );
+    }
+
+    // Bordi dorati con alone
+    for (final side in [-1.8, 1.8]) {
+      _groundLine(canvas, side, _kGold3D.withValues(alpha: 0.10), 0.22);
+      _groundLine(canvas, side, const Color(0xAAD4AF37), 0.055);
+    }
+
+    // Catarifrangenti lungo i bordi: punteggiano la corsia fino all'orizzonte.
+    const refStep = 3.0;
+    final rFirst = (travelled / refStep).floor();
+    final rLast = ((travelled + _maxZ) / refStep).ceil();
+    for (var k = rFirst; k <= rLast; k++) {
+      final z = k * refStep - travelled;
+      if (z < 0.6 || z > _maxZ) continue;
+      final dotR = max(0.9, 0.038 * lanePx * scaleAt(z));
+      _p.color = _kGoldLight3D.withValues(
+        alpha: 0.85 * (1 - _fogT(z) * 0.7),
+      );
+      for (final side in [-1.84, 1.84]) {
+        canvas.drawCircle(Offset(screenX(side, z), groundYAt(z)), dotR, _p);
+      }
+    }
 
     // Linee di mezzeria tratteggiate
     const period = 3.0;
@@ -1114,8 +1355,8 @@ class _World3D {
         _groundLine(
           canvas,
           lane,
-          Colors.white.withValues(alpha: 0.14),
-          0.045,
+          Colors.white.withValues(alpha: 0.22),
+          0.05,
           z0: max(0.0, z0),
           z1: min(_maxZ, z1),
         );
@@ -1343,7 +1584,7 @@ class _World3D {
         x: o.lane + side * (o.w / 2 - 0.05),
         z: o.z,
         w: 0.09,
-        h: 0.80,
+        h: 1.05,
         d: o.depth,
         yBottom: 0,
         front: const Color(0xFF2F4A5A),
@@ -1383,12 +1624,13 @@ class _World3D {
     final spin = cos(t * 6 + o.z).abs().clamp(0.28, 1.0).toDouble();
 
     // Alone morbido: gradiente, non un disco piatto.
+    _p.color = const Color(0xFFFFFFFF);
     _p.shader = ui.Gradient.radial(Offset(cx, cy), r * 2.6, [
       _kGold3D.withValues(alpha: 0.30),
       _kGold3D.withValues(alpha: 0.0),
     ]);
     canvas.drawCircle(Offset(cx, cy), r * 2.6, _p);
-    _p.shader = null;
+    _clearShader();
 
     // Bordo scuro per staccare dall'asfalto.
     _p.color = const Color(0xFF3B2A10);
@@ -1425,7 +1667,7 @@ class _World3D {
     final list = List<_Scenery>.of(scenery)..sort((a, b) => b.z.compareTo(a.z));
     for (final s in list) {
       if (s.z > _maxZ + 4 || s.z < -1) continue;
-      final x = s.side * (2.45 + (s.height - 1.8) * 0.05);
+      final x = s.side * (3.35 + (s.height - 1.8) * 0.05);
       switch (s.kind) {
         case _SceneryKind.palazzo:
           _paintBox(
@@ -1472,30 +1714,47 @@ class _World3D {
     final s = scaleAt(z);
     final g = groundYAt(z);
     final cx = screenX(x, z);
-    final hh = 1.5 * lanePx * s;
+    final hh = 1.9 * lanePx * s;
     final fog = _fogT(z);
+    final halo = (1 - fog * 0.8);
 
-    // Pozza di luce sull'asfalto.
-    _p.color = _kGoldLight3D.withValues(alpha: 0.10 * (1 - fog));
+    // Pozza di luce sull'asfalto: è questo che illumina la corsia.
+    _p.color = _kGoldLight3D.withValues(alpha: 0.16 * halo);
     canvas.drawOval(
       Rect.fromCenter(
         center: Offset(cx, g),
-        width: 0.95 * lanePx * s,
-        height: max(2.0, 0.28 * lanePx * s),
+        width: 1.15 * lanePx * s,
+        height: max(2.5, 0.34 * lanePx * s),
       ),
       _p,
     );
 
+    // Palo
     _line
-      ..color = _fogged(const Color(0xFF3A3350), z)
-      ..strokeWidth = max(1.0, 0.05 * lanePx * s);
+      ..color = _fogged(const Color(0xFF4A4266), z)
+      ..strokeWidth = max(1.2, 0.06 * lanePx * s);
     canvas.drawLine(Offset(cx, g), Offset(cx, g - hh), _line);
+    // Braccio verso la strada
+    final arm = (x > 0 ? -1.0 : 1.0) * 0.34 * lanePx * s;
+    canvas.drawLine(
+      Offset(cx, g - hh),
+      Offset(cx + arm, g - hh),
+      _line,
+    );
 
-    final halo = (1 - fog * 0.8);
-    _p.color = _kGoldLight3D.withValues(alpha: 0.75 * halo);
-    canvas.drawCircle(Offset(cx, g - hh), max(1.0, 0.09 * lanePx * s), _p);
-    _p.color = _kGoldLight3D.withValues(alpha: 0.10 * halo);
-    canvas.drawCircle(Offset(cx, g - hh), max(2.0, 0.22 * lanePx * s), _p);
+    final bulb = Offset(cx + arm, g - hh + 0.04 * lanePx * s);
+
+    // Alone caldo attorno alla lampadina.
+    _p.color = const Color(0xFFFFFFFF);
+    _p.shader = ui.Gradient.radial(bulb, 0.62 * lanePx * s, [
+      _kGoldLight3D.withValues(alpha: 0.38 * halo),
+      _kGoldLight3D.withValues(alpha: 0.0),
+    ]);
+    canvas.drawCircle(bulb, 0.62 * lanePx * s, _p);
+    _clearShader();
+
+    _p.color = const Color(0xFFFFF1C9).withValues(alpha: 0.95 * halo);
+    canvas.drawCircle(bulb, max(1.4, 0.10 * lanePx * s), _p);
   }
 
   void _paintPlayer(Canvas canvas) {
@@ -1506,9 +1765,9 @@ class _World3D {
     final unit = lanePx * s;
     final feet = ground - lift;
 
-    final suit = const Color(0xFF24243A);
-    final suitLight = const Color(0xFF32324E);
-    final pants = const Color(0xFF17172A);
+    final suit = const Color(0xFF2A2A44);
+    final suitLight = const Color(0xFF3A3A58);
+    final pants = const Color(0xFF1C1C30);
     final skin = const Color(0xFFC98F6B);
     final hair = const Color(0xFF241610);
 
@@ -1516,6 +1775,15 @@ class _World3D {
     final bodyH = (sliding ? 0.84 : 1.34) * unit;
     final hipY = feet - bodyH * (sliding ? 0.22 : 0.36);
     final shoulderY = feet - bodyH * (sliding ? 0.76 : 0.86);
+
+    // Alone del campione: separa la sagoma dal buio della strada.
+    _p.color = const Color(0xFFFFFFFF);
+    _p.shader = ui.Gradient.radial(Offset(cx, feet - bodyH * 0.48), bodyW * 2.0, [
+      _kGold3D.withValues(alpha: 0.16),
+      _kGold3D.withValues(alpha: 0.0),
+    ]);
+    canvas.drawCircle(Offset(cx, feet - bodyH * 0.48), bodyW * 2.0, _p);
+    _clearShader();
 
     // Ombra: si allarga a terra, si stringe in volo.
     final shadow = (1 - (y / 2.0)).clamp(0.35, 1.0).toDouble();
@@ -1611,13 +1879,24 @@ class _World3D {
     _p.color = suit;
     canvas.drawPath(torso, _p);
 
-    // Cucitura dorata sulla schiena.
-    _p.color = _kGold3D.withValues(alpha: 0.35);
-    canvas.drawRect(
-      Rect.fromCenter(
-        center: Offset(cx, (shoulderY + hipY) / 2 + bodyW * 0.06),
-        width: max(1.0, bodyW * 0.035),
-        height: (hipY - shoulderY).abs() * 0.62,
+    // Monogramma "L" dorato sulla schiena.
+    final emT = max(1.5, bodyW * 0.075);
+    final emH = bodyW * 0.30;
+    final emW2 = bodyW * 0.22;
+    final emX = cx - emW2 * 0.42;
+    final emY = (shoulderY + hipY) / 2 - emH * 0.42;
+    _p.color = _kGold3D.withValues(alpha: 0.92);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(emX, emY, emT, emH),
+        Radius.circular(emT * 0.5),
+      ),
+      _p,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(emX, emY + emH - emT, emW2, emT),
+        Radius.circular(emT * 0.5),
       ),
       _p,
     );
@@ -1667,38 +1946,60 @@ class _World3D {
       _p,
     );
 
-    final headR = bodyW * 0.30;
-    final headCy = shoulderY - headR * 1.05;
+    // ── Testa: la faccia del Lelas ───────────────────────────────────────
+    final headR = bodyW * 0.36;
+    final bob = onGround ? sin(runCycle * 2) * headR * 0.05 : -headR * 0.03;
+    final headCy = shoulderY - headR * 0.96 + bob;
 
-    // Orecchie: dietro la testa, sporgono appena.
-    _p.color = skin;
-    canvas.drawCircle(
-      Offset(cx - headR * 1.00, headCy + headR * 0.18),
-      headR * 0.17,
-      _p,
-    );
-    canvas.drawCircle(
-      Offset(cx + headR * 1.00, headCy + headR * 0.18),
-      headR * 0.17,
-      _p,
-    );
-
-    // Nuca / capelli
+    // Capelli attorno al viso, appena più larghi della cornice.
     _p.color = hair;
-    canvas.drawCircle(Offset(cx, headCy), headR, _p);
+    canvas.drawCircle(Offset(cx, headCy - headR * 0.05), headR * 1.06, _p);
 
-    // Luce dorata sui capelli: solo un filo di controluce.
-    canvas.drawArc(
-      Rect.fromCircle(center: Offset(cx, headCy), radius: headR * 0.90),
-      pi * 1.14,
-      pi * 0.40,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = max(1.2, headR * 0.14)
-        ..strokeCap = StrokeCap.round
-        ..color = _kGold3D.withValues(alpha: 0.30),
+    // Cornice dorata
+    _p.color = _kGoldLight3D;
+    canvas.drawCircle(
+      Offset(cx, headCy),
+      headR + max(1.5, headR * 0.10),
+      _p,
     );
+    _p.color = const Color(0xFF2A1E12);
+    canvas.drawCircle(
+      Offset(cx, headCy),
+      headR + max(0.8, headR * 0.03),
+      _p,
+    );
+
+    final photo = avatar;
+    if (photo != null) {
+      // Ritaglio circolare della foto.
+      canvas.save();
+      canvas.clipPath(
+        Path()
+          ..addOval(
+            Rect.fromCircle(center: Offset(cx, headCy), radius: headR),
+          ),
+      );
+      canvas.drawImageRect(
+        photo,
+        _avatarSrc(photo),
+        Rect.fromCircle(center: Offset(cx, headCy), radius: headR),
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+      canvas.restore();
+
+      // Riflesso sul vetro della cornice.
+      canvas.drawArc(
+        Rect.fromCircle(center: Offset(cx, headCy), radius: headR * 0.86),
+        pi * 1.12,
+        pi * 0.5,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = max(1.0, headR * 0.10)
+          ..strokeCap = StrokeCap.round
+          ..color = Colors.white.withValues(alpha: 0.16),
+      );
+    }
   }
 
   void _paintParticles(Canvas canvas) {
@@ -1723,6 +2024,16 @@ class _World3D {
       ((z - 6.0) / (_maxZ - 6.0)).clamp(0.0, 1.0).toDouble();
 
   Color _fogged(Color c, double z) => Color.lerp(c, _kFog, _fogT(z) * 0.85)!;
+
+  /// Ritaglio quadrato della foto, un po' alto dove sta la faccia.
+  Rect _avatarSrc(ui.Image img) {
+    final iw = img.width.toDouble();
+    final ih = img.height.toDouble();
+    final side = min(iw, ih);
+    final left = (iw - side) / 2;
+    final top = (ih - side) * 0.20;
+    return Rect.fromLTWH(left, top, side, side);
+  }
 
   static Color _darken(Color c, double f) =>
       Color.from(alpha: c.a, red: c.r * f, green: c.g * f, blue: c.b * f);
